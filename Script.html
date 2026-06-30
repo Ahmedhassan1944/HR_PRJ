@@ -1,0 +1,1568 @@
+<script>
+  /**
+   * =========================================================
+   * ENTERPRISE HR MOBILIZATION — FRONTEND SPA (Script.html)
+   * =========================================================
+   * Single-Page Application logic:
+   *  - State management
+   *  - Router / view renderer
+   *  - GAS bridge (google.script.run)
+   *  - Views: Dashboard, Candidates, New Candidate, Detail, Audit Log
+   * =========================================================
+   */
+
+  // ─────────────────────────────────────────────
+  // GLOBAL STATE
+  // ─────────────────────────────────────────────
+
+  const App = {
+    state: {
+      currentUser: { name: 'HR Coordinator', role: 'HR_COORDINATOR', email: '' },
+      currentView: 'dashboard',
+      candidates: [],
+      filteredCandidates: [],
+      selectedCandidate: null,
+      filterStatus: 'all',
+      searchQuery: '',
+      loading: false,
+      kpi: { activeCount: 0, missingDocs: 0, visaPending: 0, visaCompleted: 0, mobilized: 0 },
+      // ── Document completeness cache ──────────────────────────
+      // Keyed by CandidateID → { pct, missingDocs, presentDocs }
+      // Populated lazily by _loadAllCompleteness(); UI-only, no DB writes.
+      docCompleteness: {},
+      // ── Candidates table state ───────────────────────────────
+      sortCol: '',           // column key to sort by
+      sortDir: 'asc',        // 'asc' | 'desc'
+      statusFilters: [],     // [] = all; otherwise array of status strings
+      docFilters: [],        // array of doc-type strings meaning "missing these"
+      sidebarCollapsed: false, // ── Sidebar collapse state ──
+    },
+
+    setState(partial) {
+      Object.assign(this.state, partial);
+    },
+
+    toggleSidebar(forceState) {
+      const isCollapsed = forceState !== undefined ? forceState : !this.state.sidebarCollapsed;
+      this.setState({ sidebarCollapsed: isCollapsed });
+      localStorage.setItem('hr_sidebar_collapsed', isCollapsed);
+      const appEl = document.getElementById('app');
+      if (appEl) {
+        if (isCollapsed) appEl.classList.add('app--collapsed');
+        else appEl.classList.remove('app--collapsed');
+      }
+    }
+  };
+
+  // ─────────────────────────────────────────────
+  // GAS BRIDGE
+  // ─────────────────────────────────────────────
+
+  const GAS = {
+    isLive: typeof google !== 'undefined' && !!google.script,
+
+    call(fnName, ...args) {
+      return new Promise((resolve, reject) => {
+        if (!this.isLive) {
+          resolve(this._mockData(fnName, ...args));
+          return;
+        }
+        let call = google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject);
+        call[fnName](...args);
+      });
+    },
+
+    // ── Mock data for local / offline preview ──
+    _mockData(fnName, ...args) {
+      const candidates = [
+        { CandidateID: 'c-001', FullName: 'Ahmed Ali',     Position: 'Civil Engineer',   Department: 'Projects',     Email: 'ahmed@test.com',  Nationality: 'Egyptian',  CurrentStatus: 'Pending Passport',             CreatedAt: '2026-06-01T08:00:00Z', DriveFolderID: 'folder-001' },
+        { CandidateID: 'c-002', FullName: 'Sara Mohamed',  Position: 'HR Specialist',    Department: 'HR',           Email: 'sara@test.com',   Nationality: 'Egyptian',  CurrentStatus: 'Pending Photo',                CreatedAt: '2026-06-03T09:00:00Z', DriveFolderID: 'folder-002' },
+        { CandidateID: 'c-003', FullName: 'Omar Khaled',   Position: 'Mech. Engineer',   Department: 'Maintenance',  Email: 'omar@test.com',   Nationality: 'Sudanese',  CurrentStatus: 'Documents Complete',           CreatedAt: '2026-06-05T10:00:00Z', DriveFolderID: 'folder-003' },
+        { CandidateID: 'c-004', FullName: 'Nadia Youssef', Position: 'Accountant',       Department: 'Finance',      Email: 'nadia@test.com',  Nationality: 'Egyptian',  CurrentStatus: 'Mobilized',                    CreatedAt: '2026-05-20T07:00:00Z', DriveFolderID: 'folder-004' },
+        { CandidateID: 'c-005', FullName: 'Khaled Hassan', Position: 'Site Supervisor',  Department: 'Projects',     Email: 'khaled@test.com', Nationality: 'Jordanian', CurrentStatus: 'Visa Pending',                 CreatedAt: '2026-06-10T11:00:00Z', DriveFolderID: 'folder-005' },
+        { CandidateID: 'c-006', FullName: 'Layla Ibrahim', Position: 'Safety Officer',   Department: 'Safety',       Email: 'layla@test.com',  Nationality: 'Egyptian',  CurrentStatus: 'Visa Completed',               CreatedAt: '2026-06-12T09:00:00Z', DriveFolderID: 'folder-006' },
+        { CandidateID: 'c-007', FullName: 'Hassan Nour',   Position: 'QC Inspector',     Department: 'Operations',   Email: 'hassan@test.com', Nationality: 'Sudanese',  CurrentStatus: 'Pending Academic Certificate', CreatedAt: '2026-06-14T08:00:00Z', DriveFolderID: 'folder-007' },
+        { CandidateID: 'c-008', FullName: 'Rania Saleh',   Position: 'Procurement Eng.', Department: 'Operations',   Email: 'rania@test.com',  Nationality: 'Egyptian',  CurrentStatus: 'New Candidate',                CreatedAt: '2026-06-20T10:00:00Z', DriveFolderID: '' },
+      ];
+      const documents = [
+        // ── c-001 Ahmed Ali: Passport✓ Photo(review) Medical(rejected) → 33% missing Photo,Medical,Acad,Visa,CV
+        { DocumentID: 'd-001', CandidateID: 'c-001', DocType: 'Passport',             FileName: 'passport.pdf',  FileURL: '#', UploadDate: '2026-06-02T08:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-002', CandidateID: 'c-001', DocType: 'Photo',                FileName: 'photo.jpg',     FileURL: '#', UploadDate: '2026-06-02T08:30:00Z', ApprovalStatus: 'Pending Review', ApprovedBy: '',               VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-003', CandidateID: 'c-001', DocType: 'Medical',              FileName: 'medical.pdf',   FileURL: '#', UploadDate: '2026-06-02T09:00:00Z', ApprovalStatus: 'Rejected',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: 'Illegible scan' },
+        // ── c-002 Sara Mohamed: Photo only → 17% missing Passport,Acad,Medical,Visa,CV
+        { DocumentID: 'd-010', CandidateID: 'c-002', DocType: 'Photo',                FileName: 'photo.jpg',     FileURL: '#', UploadDate: '2026-06-04T08:00:00Z', ApprovalStatus: 'Pending Review', ApprovedBy: '',               VersionNumber: 1, Remarks: '' },
+        // ── c-003 Omar Khaled: All 6 docs approved → 100%
+        { DocumentID: 'd-004', CandidateID: 'c-003', DocType: 'Passport',             FileName: 'passport.pdf',  FileURL: '#', UploadDate: '2026-06-06T08:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-005', CandidateID: 'c-003', DocType: 'Photo',                FileName: 'photo.jpg',     FileURL: '#', UploadDate: '2026-06-06T08:30:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-006', CandidateID: 'c-003', DocType: 'Academic Certificate', FileName: 'degree.pdf',    FileURL: '#', UploadDate: '2026-06-06T09:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-007', CandidateID: 'c-003', DocType: 'Medical',              FileName: 'medical.pdf',   FileURL: '#', UploadDate: '2026-06-06T09:30:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-008', CandidateID: 'c-003', DocType: 'Visa',                 FileName: 'visa.pdf',      FileURL: '#', UploadDate: '2026-06-07T08:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-009', CandidateID: 'c-003', DocType: 'CV',                   FileName: 'cv.pdf',        FileURL: '#', UploadDate: '2026-06-07T08:30:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        // ── c-004 Nadia Youssef: All 6 approved (Mobilized) → 100%
+        { DocumentID: 'd-011', CandidateID: 'c-004', DocType: 'Passport',             FileName: 'passport.pdf',  FileURL: '#', UploadDate: '2026-05-21T08:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-012', CandidateID: 'c-004', DocType: 'Photo',                FileName: 'photo.jpg',     FileURL: '#', UploadDate: '2026-05-21T09:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-013', CandidateID: 'c-004', DocType: 'Academic Certificate', FileName: 'degree.pdf',    FileURL: '#', UploadDate: '2026-05-22T08:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-014', CandidateID: 'c-004', DocType: 'Medical',              FileName: 'medical.pdf',   FileURL: '#', UploadDate: '2026-05-22T09:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-015', CandidateID: 'c-004', DocType: 'Visa',                 FileName: 'visa.pdf',      FileURL: '#', UploadDate: '2026-05-23T08:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-016', CandidateID: 'c-004', DocType: 'CV',                   FileName: 'cv.pdf',        FileURL: '#', UploadDate: '2026-05-23T09:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        // ── c-005 Khaled Hassan: Passport,Photo,Acad,Medical → 67% missing Visa,CV
+        { DocumentID: 'd-017', CandidateID: 'c-005', DocType: 'Passport',             FileName: 'passport.pdf',  FileURL: '#', UploadDate: '2026-06-11T08:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-018', CandidateID: 'c-005', DocType: 'Photo',                FileName: 'photo.jpg',     FileURL: '#', UploadDate: '2026-06-11T09:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-019', CandidateID: 'c-005', DocType: 'Academic Certificate', FileName: 'degree.pdf',    FileURL: '#', UploadDate: '2026-06-11T10:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-020', CandidateID: 'c-005', DocType: 'Medical',              FileName: 'medical.pdf',   FileURL: '#', UploadDate: '2026-06-11T11:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        // ── c-006 Layla Ibrahim: Passport,Photo,Acad,Medical,Visa → 83% missing CV
+        { DocumentID: 'd-021', CandidateID: 'c-006', DocType: 'Passport',             FileName: 'passport.pdf',  FileURL: '#', UploadDate: '2026-06-13T08:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-022', CandidateID: 'c-006', DocType: 'Photo',                FileName: 'photo.jpg',     FileURL: '#', UploadDate: '2026-06-13T09:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-023', CandidateID: 'c-006', DocType: 'Academic Certificate', FileName: 'degree.pdf',    FileURL: '#', UploadDate: '2026-06-13T10:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-024', CandidateID: 'c-006', DocType: 'Medical',              FileName: 'medical.pdf',   FileURL: '#', UploadDate: '2026-06-13T11:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-025', CandidateID: 'c-006', DocType: 'Visa',                 FileName: 'visa.pdf',      FileURL: '#', UploadDate: '2026-06-14T08:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        // ── c-007 Hassan Nour: Passport,Photo,Medical → 50% missing Acad,Visa,CV
+        { DocumentID: 'd-026', CandidateID: 'c-007', DocType: 'Passport',             FileName: 'passport.pdf',  FileURL: '#', UploadDate: '2026-06-15T08:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-027', CandidateID: 'c-007', DocType: 'Photo',                FileName: 'photo.jpg',     FileURL: '#', UploadDate: '2026-06-15T09:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        { DocumentID: 'd-028', CandidateID: 'c-007', DocType: 'Medical',              FileName: 'medical.pdf',   FileURL: '#', UploadDate: '2026-06-15T10:00:00Z', ApprovalStatus: 'Approved',       ApprovedBy: 'hr@company.com', VersionNumber: 1, Remarks: '' },
+        // ── c-008 Rania Saleh: No docs yet → 0%
+      ];
+      const logs = [
+        { LogID: 'l-1', Timestamp: '2026-06-01T08:00:00Z', CandidateID: 'c-001', Actor: 'SYSTEM', Event: 'Candidate Created: Ahmed Ali' },
+        { LogID: 'l-2', Timestamp: '2026-06-01T09:00:00Z', CandidateID: 'c-001', Actor: 'SYSTEM', Event: 'Drive Folder Created' },
+        { LogID: 'l-3', Timestamp: '2026-06-02T08:05:00Z', CandidateID: 'c-001', Actor: 'ahmed@test.com', Event: 'Document Uploaded: Passport' },
+        { LogID: 'l-4', Timestamp: '2026-06-03T10:00:00Z', CandidateID: 'c-001', Actor: 'hr@company.com', Event: 'Document Approved: Passport' },
+      ];
+
+      if (fnName === 'api_getDashboardData') return { success: true, data: { activeCount: 24, missingDocs: 9, visaPending: 6, visaCompleted: 4, mobilized: 8 } };
+      if (fnName === 'api_getAllCandidates') return { success: true, data: candidates };
+      if (fnName === 'api_createCandidate') return { success: true, candidateId: 'new-' + Date.now() };
+      if (fnName === 'api_updateCandidateStatus') return { success: true };
+      if (fnName === 'api_updateCandidateDetails') return { success: true };
+      if (fnName === 'api_getDocumentsByCandidate') return { success: true, data: documents.filter(d => d.CandidateID === args[0]) };
+      if (fnName === 'api_reviewDocument') return { success: true };
+      if (fnName === 'api_getAuditLog') return { success: true, data: logs.filter(l => l.CandidateID === args[0]) };
+      if (fnName === 'api_createCandidateFolder') return { success: true, folderId: 'mock-folder', url: '#' };
+      if (fnName === 'api_uploadFileToDrive') return { success: true, fileUrl: '#', documentId: 'mock-doc-id' };
+      if (fnName === 'api_sendRejectionEmail') return { success: true };
+      if (fnName === 'api_sendWelcomeEmail') return { success: true };
+      return { success: true };
+    }
+  };
+
+  // ─────────────────────────────────────────────
+  // TOAST NOTIFICATIONS
+  // ─────────────────────────────────────────────
+
+  const Toast = {
+    show(message, type = 'default', duration = 3500) {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = `toast toast--${type}`;
+      const icons = { success: '✅', error: '❌', warning: '⚠️', default: 'ℹ️' };
+      toast.innerHTML = `<span>${icons[type] || icons.default}</span><span>${message}</span>`;
+      container.appendChild(toast);
+      setTimeout(() => toast.remove(), duration);
+    },
+    success(msg) { this.show(msg, 'success'); },
+    error(msg) { this.show(msg, 'error'); },
+    warning(msg) { this.show(msg, 'warning'); }
+  };
+
+  // ─────────────────────────────────────────────
+  // MODAL HELPER
+  // ─────────────────────────────────────────────
+
+  const Modal = {
+    open(html) {
+      const root = document.getElementById('modal-root');
+      root.innerHTML = `
+      <div class="modal-overlay" id="modal-overlay" role="dialog" aria-modal="true">
+        <div class="modal">${html}</div>
+      </div>`;
+      requestAnimationFrame(() => document.getElementById('modal-overlay').classList.add('open'));
+      document.getElementById('modal-overlay').addEventListener('click', e => {
+        if (e.target.id === 'modal-overlay') Modal.close();
+      });
+    },
+    close() {
+      const overlay = document.getElementById('modal-overlay');
+      if (!overlay) return;
+      overlay.classList.remove('open');
+      setTimeout(() => { document.getElementById('modal-root').innerHTML = ''; }, 250);
+    }
+  };
+
+  // ─────────────────────────────────────────────
+  // UTILITY HELPERS
+  // ─────────────────────────────────────────────
+
+  const fmt = {
+    date(iso) {
+      if (!iso) return '—';
+      try { return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
+      catch (_) { return iso; }
+    },
+    dateTime(iso) {
+      if (!iso) return '—';
+      try { return new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+      catch (_) { return iso; }
+    },
+    initials(name) {
+      return (name || '').split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
+    }
+  };
+
+  const statusBadge = (status) => {
+    const map = {
+      // ── Legacy statuses (backward-compatible) ──
+      'Documents Requested':           'pending',
+      'documents requested':           'pending',
+      'Pending Validation':            'review',
+      'pending validation':            'review',
+      'Pending Review':                'review',
+      'Approved':                      'approved',
+      'Approved – Medical':            'approved',
+      'Rejected':                      'rejected',
+      'Closed':                        'closed',
+      // ── New lifecycle statuses ──
+      'New Candidate':                 'new',
+      'Pending Passport':              'pending',
+      'Pending Photo':                 'pending',
+      'Pending Academic Certificate':  'pending',
+      'Pending Medical':               'pending',
+      'Documents Complete':            'docs-complete',
+      'Visa Pending':                  'visa-pending',
+      'Visa Completed':                'visa-completed',
+      'Mobilized':                     'mobilized',
+    };
+    const cls = map[status] || 'pending';
+    return `<span class="badge badge--${cls}">${status || 'Unknown'}</span>`;
+  };
+
+  const escHtml = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // ─────────────────────────────────────────────
+  // DOCUMENT COMPLETENESS — SHARED CONSTANTS
+  // Single source of truth, reused by both the
+  // Candidate Detail view and the batch-fetch
+  // in the Candidates list view.
+  // ─────────────────────────────────────────────
+
+  const REQUIRED_DOCS = ['Passport', 'Photo', 'Academic Certificate', 'Medical', 'Visa', 'CV'];
+
+  /**
+   * Compute document completeness from a flat array of document objects.
+   * Mirrors the exact logic already in _loadCandidateDocuments — no duplication.
+   * @param {Object[]} docs - raw document records from api_getDocumentsByCandidate
+   * @returns {{ pct:number, missingDocs:string[], presentDocs:string[] }}
+   */
+  const computeCompleteness = (docs) => {
+    const uploadedTypes = new Set(
+      (docs || [])
+        .filter(d => d.ApprovalStatus !== 'Rejected')
+        .map(d => (d.DocType || '').trim())
+    );
+    const presentDocs = REQUIRED_DOCS.filter(req => uploadedTypes.has(req));
+    const missingDocs = REQUIRED_DOCS.filter(req => !uploadedTypes.has(req));
+    const pct         = Math.round((presentDocs.length / REQUIRED_DOCS.length) * 100);
+    return { pct, missingDocs, presentDocs };
+  };
+
+  // ─────────────────────────────────────────────
+  // ROUTER
+  // ─────────────────────────────────────────────
+
+  const Router = {
+    navigate(view, params = {}) {
+      App.setState({ currentView: view, ...params });
+      renderSidebar();
+      renderView();
+      document.getElementById('app-view')?.focus();
+    }
+  };
+
+  // ─────────────────────────────────────────────
+  // TOPBAR RENDERER
+  // ─────────────────────────────────────────────
+
+  const renderTopbar = () => {
+    const { name, role } = App.state.currentUser;
+    document.getElementById('topbar').innerHTML = `
+    <div class="topbar__brand">
+      <div class="topbar__brand-icon" aria-hidden="true">HR</div>
+      <span>HR Mobilization System</span>
+    </div>
+    <div class="topbar__right">
+      <button class="notification-btn" id="notif-btn" aria-label="Notifications">
+        🔔
+        <span class="notification-btn__dot" aria-hidden="true"></span>
+      </button>
+      <div class="topbar__user" tabindex="0" role="button" aria-label="User profile">
+        <div class="topbar__avatar" aria-hidden="true">${fmt.initials(name)}</div>
+        <div>
+          <div class="topbar__username">${escHtml(name)}</div>
+          <div class="topbar__role-badge">${escHtml(role)}</div>
+        </div>
+      </div>
+    </div>`;
+  };
+
+  // ─────────────────────────────────────────────
+  // SIDEBAR RENDERER
+  // ─────────────────────────────────────────────
+
+  const sidebar_items = [
+    { view: 'dashboard', icon: '📊', label: 'Dashboard' },
+    { view: 'candidates', icon: '👥', label: 'Candidates', badge: () => App.state.candidates.filter(c => c.CurrentStatus === 'Documents Requested').length || '' },
+    { view: 'audit', icon: '📋', label: 'Audit Log' },
+  ];
+
+  const renderSidebar = () => {
+    const current = App.state.currentView;
+    const items = sidebar_items.map(item => {
+      const badge = item.badge ? item.badge() : '';
+      const badgeHtml = badge ? `<span class="nav__badge" aria-label="${badge} items">${badge}</span>` : '';
+      return `
+      <div class="nav__item ${current === item.view ? 'active' : ''}"
+           role="button" tabindex="0" data-label="${item.label}"
+           aria-current="${current === item.view ? 'page' : 'false'}"
+           onclick="Router.navigate('${item.view}')"
+           onkeydown="if(event.key==='Enter')Router.navigate('${item.view}')">
+        <span class="nav__item-icon" aria-hidden="true">${item.icon}</span>
+        <span>${item.label}</span>
+        ${badgeHtml}
+      </div>`;
+    }).join('');
+
+    document.getElementById('sidebar').innerHTML = `
+    <div class="sidebar__toggle" onclick="App.toggleSidebar()" role="button" tabindex="0" aria-label="Toggle Sidebar">
+      <span aria-hidden="true">☰</span>
+    </div>
+    <div class="sidebar__section-label">Main Menu</div>
+    ${items}
+    <div class="sidebar__footer">
+      Enterprise HR System v2.0<br>
+      &copy; 2026
+    </div>`;
+  };
+
+  // ─────────────────────────────────────────────
+  // VIEW DISPATCHER
+  // ─────────────────────────────────────────────
+
+  const renderView = () => {
+    const view = document.getElementById('app-view');
+    const { currentView } = App.state;
+    if (currentView === 'dashboard') Views.dashboard(view);
+    else if (currentView === 'candidates') Views.candidates(view);
+    else if (currentView === 'candidate-detail') Views.candidateDetail(view);
+    else if (currentView === 'new-candidate') Views.newCandidate(view);
+    else if (currentView === 'audit') Views.auditLog(view);
+    else view.innerHTML = '<div class="loading-overlay">404 — View not found.</div>';
+  };
+
+  // ─────────────────────────────────────────────
+  // VIEWS
+  // ─────────────────────────────────────────────
+
+  const Views = {
+
+    // ── DASHBOARD ──────────────────────────────
+    dashboard(container) {
+      container.innerHTML = `
+      <div class="page-header">
+        <div>
+          <h1 class="page-header__title">Dashboard</h1>
+          <p class="page-header__sub">Live overview of all mobilization cases — ${fmt.date(new Date().toISOString())}</p>
+        </div>
+        <div class="page-header__actions">
+          <button class="btn btn--outline btn--sm" onclick="Views._refreshDashboard()" aria-label="Refresh dashboard">
+            🔄 Refresh
+          </button>
+          <button class="btn btn--primary btn--sm" onclick="Router.navigate('new-candidate')">
+            ＋ New Candidate
+          </button>
+        </div>
+      </div>
+
+      <div class="kpi-grid" id="kpi-grid">
+        ${[1, 2, 3, 4, 5].map(() => `<div class="kpi-card"><div class="skeleton" style="height:80px"></div></div>`).join('')}
+      </div>
+
+      <div class="table-card">
+        <div class="table-toolbar">
+          <span class="table-toolbar__title">Recent Candidates</span>
+          <button class="btn btn--outline btn--sm" onclick="Router.navigate('candidates')">View All →</button>
+        </div>
+        <div id="dashboard-table">
+          <div class="loading-overlay"><div class="spinner spinner--dark"></div>Loading…</div>
+        </div>
+      </div>`;
+
+      Views._refreshDashboard();
+    },
+
+    async _refreshDashboard() {
+      try {
+        const [kpiRes, candsRes] = await Promise.all([
+          GAS.call('api_getDashboardData'),
+          GAS.call('api_getAllCandidates')
+        ]);
+
+        if (kpiRes.success) {
+          const k = kpiRes.data;
+          document.getElementById('kpi-grid').innerHTML = `
+          ${Views._kpiCard('Active Cases',     k.activeCount   ?? '--', '🏗️', 'blue',   'Total mobilization cases in progress')}
+          ${Views._kpiCard('Missing Documents', k.missingDocs   ?? '--', '❗',  'orange', 'Candidates with incomplete document sets')}
+          ${Views._kpiCard('Visa Pending',      k.visaPending   ?? '--', '🛂',  'red',    'Candidates awaiting visa issuance')}
+          ${Views._kpiCard('Visa Completed',    k.visaCompleted ?? '--', '✅',  'green',  'Candidates with issued visas')}
+          ${Views._kpiCard('Mobilized',         k.mobilized     ?? '--', '✈️', 'purple', 'Successfully mobilized this cycle')}`;
+        }
+
+        if (candsRes.success) {
+          App.setState({ candidates: candsRes.data });
+          const recent = candsRes.data.slice(0, 5);
+          document.getElementById('dashboard-table').innerHTML = recent.length
+            ? Views._candidateTableHtml(recent)
+            : '<div class="table-empty"><div class="table-empty__icon">👥</div>No candidates yet.</div>';
+        }
+      } catch (err) {
+        Toast.error('Failed to load dashboard data.');
+        console.error(err);
+      }
+    },
+
+    _kpiCard(label, value, icon, color, footer) {
+      return `
+      <div class="kpi-card kpi-card--${color}">
+        <div class="kpi-card__label">${label}</div>
+        <div class="kpi-card__value">${value}</div>
+        <div class="kpi-card__footer">${footer}</div>
+        <div class="kpi-card__icon" aria-hidden="true">${icon}</div>
+      </div>`;
+    },
+
+    // ── CANDIDATES LIST ────────────────────────
+    candidates(container) {
+      // Reset per-view filter state so filters don't persist between navigations
+      App.setState({ sortCol: '', sortDir: 'asc', statusFilters: [], docFilters: [] });
+
+      container.innerHTML = `
+      <div class="page-header">
+        <div>
+          <h1 class="page-header__title">Candidates</h1>
+          <p class="page-header__sub">All mobilization candidates · document completeness · missing documents</p>
+        </div>
+        <div class="page-header__actions">
+          <button class="btn btn--outline btn--sm" onclick="Views._exportCandidates()" aria-label="Export candidates list">📤 Export</button>
+          <button class="btn btn--primary" onclick="Router.navigate('new-candidate')">＋ New Candidate</button>
+        </div>
+      </div>
+
+      <div class="table-card">
+
+        <!-- ── Toolbar: count + search + filter toggles ── -->
+        <div class="table-toolbar">
+          <span class="table-toolbar__title" id="cands-count">Loading…</span>
+          <div class="table-toolbar__actions">
+            <div class="search-input">
+              <span class="search-input__icon" aria-hidden="true">🔍</span>
+              <input type="search" id="search-input" placeholder="Search name, email, position…"
+                     aria-label="Search candidates" oninput="Views._filterCandidates()" autocomplete="off">
+            </div>
+            <button class="btn btn--outline btn--sm" id="adv-filter-btn"
+                    onclick="Views._toggleAdvancedFilters()" aria-expanded="false">⚙ Filters</button>
+            <button class="btn btn--ghost btn--sm" id="clear-filters-btn" style="display:none"
+                    onclick="Views._clearAllFilters()" aria-label="Clear all filters">✕ Clear</button>
+          </div>
+        </div>
+
+        <!-- ── Quick Filter Pills ── -->
+        <div class="quick-filters" role="group" aria-label="Quick filters">
+          <span class="quick-filters__label">Quick:</span>
+          <button class="quick-filter-btn" id="qf-doc-Passport"
+                  onclick="Views._toggleDocFilter('Passport')" aria-pressed="false">⚠ Missing Passport</button>
+          <button class="quick-filter-btn" id="qf-doc-Photo"
+                  onclick="Views._toggleDocFilter('Photo')" aria-pressed="false">⚠ Missing Photo</button>
+          <button class="quick-filter-btn" id="qf-doc-Academic_Certificate"
+                  onclick="Views._toggleDocFilter('Academic Certificate')" aria-pressed="false">⚠ Missing Acad. Cert.</button>
+          <button class="quick-filter-btn" id="qf-doc-Medical"
+                  onclick="Views._toggleDocFilter('Medical')" aria-pressed="false">⚠ Missing Medical</button>
+          <button class="quick-filter-btn" id="qf-doc-Visa"
+                  onclick="Views._toggleDocFilter('Visa')" aria-pressed="false">⚠ Missing Visa</button>
+          <button class="quick-filter-btn" id="qf-doc-CV"
+                  onclick="Views._toggleDocFilter('CV')" aria-pressed="false">⚠ Missing CV</button>
+          <span class="quick-filters__sep" aria-hidden="true">|</span>
+          <button class="quick-filter-btn" id="qf-status-Visa_Pending"
+                  onclick="Views._toggleStatusFilter('Visa Pending')" aria-pressed="false">🕐 Visa Pending</button>
+          <button class="quick-filter-btn" id="qf-status-Visa_Completed"
+                  onclick="Views._toggleStatusFilter('Visa Completed')" aria-pressed="false">🛂 Visa Completed</button>
+          <button class="quick-filter-btn" id="qf-status-Mobilized"
+                  onclick="Views._toggleStatusFilter('Mobilized')" aria-pressed="false">✈ Mobilized</button>
+          <button class="quick-filter-btn" id="qf-status-Documents_Complete"
+                  onclick="Views._toggleStatusFilter('Documents Complete')" aria-pressed="false">✅ Docs Complete</button>
+        </div>
+
+        <!-- ── Advanced Filter Panel (collapsible) ── -->
+        <div class="filter-panel" id="advanced-filter-panel" hidden>
+          <div class="filter-panel__inner">
+
+            <div class="filter-section">
+              <div class="filter-section__label">📋 Status</div>
+              <div class="filter-check-group">
+                <label class="filter-check-item"><input type="checkbox" class="status-check" value="New Candidate"                id="sc-New_Candidate"                onchange="Views._onStatusCheckChange()"><span>New Candidate</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="status-check" value="Pending Passport"             id="sc-Pending_Passport"             onchange="Views._onStatusCheckChange()"><span>Pending Passport</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="status-check" value="Pending Photo"                id="sc-Pending_Photo"                onchange="Views._onStatusCheckChange()"><span>Pending Photo</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="status-check" value="Pending Academic Certificate" id="sc-Pending_Academic_Certificate"  onchange="Views._onStatusCheckChange()"><span>Pending Academic Certificate</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="status-check" value="Pending Medical"              id="sc-Pending_Medical"              onchange="Views._onStatusCheckChange()"><span>Pending Medical</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="status-check" value="Documents Complete"          id="sc-Documents_Complete"           onchange="Views._onStatusCheckChange()"><span>Documents Complete</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="status-check" value="Visa Pending"                id="sc-Visa_Pending"                 onchange="Views._onStatusCheckChange()"><span>Visa Pending</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="status-check" value="Visa Completed"              id="sc-Visa_Completed"               onchange="Views._onStatusCheckChange()"><span>Visa Completed</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="status-check" value="Mobilized"                   id="sc-Mobilized"                    onchange="Views._onStatusCheckChange()"><span>Mobilized</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="status-check" value="Closed"                      id="sc-Closed"                       onchange="Views._onStatusCheckChange()"><span>Closed</span></label>
+              </div>
+            </div>
+
+            <div class="filter-section">
+              <div class="filter-section__label">📎 Missing Documents</div>
+              <div class="filter-check-group">
+                <label class="filter-check-item"><input type="checkbox" class="doc-check" value="Passport"             id="dc-Passport"             onchange="Views._onDocCheckChange()"><span>Missing Passport</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="doc-check" value="Photo"                id="dc-Photo"                onchange="Views._onDocCheckChange()"><span>Missing Photo</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="doc-check" value="Academic Certificate" id="dc-Academic_Certificate" onchange="Views._onDocCheckChange()"><span>Missing Academic Certificate</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="doc-check" value="Medical"              id="dc-Medical"              onchange="Views._onDocCheckChange()"><span>Missing Medical</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="doc-check" value="Visa"                 id="dc-Visa"                 onchange="Views._onDocCheckChange()"><span>Missing Visa</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="doc-check" value="CV"                   id="dc-CV"                   onchange="Views._onDocCheckChange()"><span>Missing CV</span></label>
+              </div>
+            </div>
+
+            <div class="filter-section">
+              <div class="filter-section__label">🏢 Department</div>
+              <select id="dept-filter" class="form-select" style="max-width:190px" onchange="Views._filterCandidates()">
+                <option value="">All Departments</option>
+                <option>Projects</option><option>Maintenance</option><option>Finance</option>
+                <option>HR</option><option>Operations</option><option>IT</option><option>Safety</option>
+              </select>
+            </div>
+
+            <div class="filter-section">
+              <div class="filter-section__label">📊 Min. Completion %</div>
+              <div style="display:flex;align-items:center;gap:var(--sp-2)">
+                <input type="range" id="completion-min" min="0" max="100" step="17" value="0"
+                       style="width:130px;accent-color:var(--primary)" oninput="Views._onCompletionRange(this.value)">
+                <span id="completion-min-val" style="font-weight:700;color:var(--primary);min-width:36px">0%</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ── Table ── -->
+        <div id="candidates-table">
+          <div class="loading-overlay"><div class="spinner spinner--dark"></div>Loading candidates…</div>
+        </div>
+        <div class="table-footer" id="table-footer"></div>
+      </div>`;
+
+      Views._loadCandidates();
+    },
+
+    // ── Load candidates then kick off batch completeness fetch ──
+    async _loadCandidates() {
+      try {
+        const res = await GAS.call('api_getAllCandidates');
+        if (!res.success) throw new Error(res.error);
+        App.setState({ candidates: res.data, filteredCandidates: res.data });
+        // Render immediately (completeness cells will show "Loading…" state)
+        Views._renderCandidatesTable(res.data);
+        // Fire off batch completeness fetch in background
+        Views._loadAllCompleteness(res.data);
+      } catch (err) {
+        document.getElementById('candidates-table').innerHTML =
+          `<div class="table-empty"><div class="table-empty__icon">⚠️</div>Failed to load: ${escHtml(err.message)}</div>`;
+        Toast.error('Failed to load candidates.');
+      }
+    },
+
+    // ── Batch-fetch document completeness for every candidate ──
+    // Reuses api_getDocumentsByCandidate + computeCompleteness — no duplication.
+    async _loadAllCompleteness(candidates) {
+      try {
+        const results = await Promise.allSettled(
+          candidates.map(c => GAS.call('api_getDocumentsByCandidate', c.CandidateID))
+        );
+        const completeness = {};
+        results.forEach((result, i) => {
+          const cand = candidates[i];
+          completeness[cand.CandidateID] = (result.status === 'fulfilled' && result.value?.success)
+            ? computeCompleteness(result.value.data)
+            : { pct: 0, missingDocs: [...REQUIRED_DOCS], presentDocs: [] };
+        });
+        App.setState({ docCompleteness: completeness });
+        // Re-render table now that completeness data is available
+        Views._filterCandidates();
+      } catch (err) {
+        console.error('Completeness batch load error:', err);
+      }
+    },
+
+    // ── Combined filter + sort ──
+    _filterCandidates() {
+      const query         = (document.getElementById('search-input')?.value || '').toLowerCase();
+      const deptFilter    = document.getElementById('dept-filter')?.value || '';
+      const completionMin = parseInt(document.getElementById('completion-min')?.value || '0', 10);
+      const { statusFilters, docFilters, docCompleteness, sortCol, sortDir } = App.state;
+
+      let data = App.state.candidates.filter(c => {
+        // Text search
+        const matchQ = !query ||
+          c.FullName?.toLowerCase().includes(query) ||
+          c.Email?.toLowerCase().includes(query) ||
+          c.Position?.toLowerCase().includes(query);
+        // Multi-select status (empty array = all)
+        const matchS = statusFilters.length === 0 || statusFilters.includes(c.CurrentStatus);
+        // Department
+        const matchD = !deptFilter || c.Department === deptFilter;
+        // Missing doc filter — candidate must be missing ANY of the selected doc types
+        const comp = docCompleteness[c.CandidateID];
+        const matchDoc = docFilters.length === 0 ||
+          (comp && docFilters.some(doc => comp.missingDocs.includes(doc)));
+        // Minimum completion %
+        const matchCompletion = !comp || comp.pct >= completionMin;
+        return matchQ && matchS && matchD && matchDoc && matchCompletion;
+      });
+
+      // Sorting
+      if (sortCol) {
+        data = [...data].sort((a, b) => {
+          let valA, valB;
+          if (sortCol === 'pct') {
+            valA = docCompleteness[a.CandidateID]?.pct ?? -1;
+            valB = docCompleteness[b.CandidateID]?.pct ?? -1;
+          } else if (sortCol === 'missingCount') {
+            valA = docCompleteness[a.CandidateID]?.missingDocs.length ?? REQUIRED_DOCS.length;
+            valB = docCompleteness[b.CandidateID]?.missingDocs.length ?? REQUIRED_DOCS.length;
+          } else {
+            valA = (a[sortCol] || '').toString().toLowerCase();
+            valB = (b[sortCol] || '').toString().toLowerCase();
+          }
+          if (valA < valB) return sortDir === 'asc' ? -1 : 1;
+          if (valA > valB) return sortDir === 'asc' ?  1 : -1;
+          return 0;
+        });
+      }
+
+      App.setState({ filteredCandidates: data });
+      Views._renderCandidatesTable(data);
+    },
+
+    // ── Column sort toggle ──
+    _sortBy(col) {
+      const { sortCol, sortDir } = App.state;
+      App.setState({
+        sortCol: col,
+        sortDir: sortCol === col && sortDir === 'asc' ? 'desc' : 'asc'
+      });
+      Views._filterCandidates();
+    },
+
+    // ── Quick-filter: toggle a doc type as "missing" ──
+    _toggleDocFilter(docType) {
+      const key     = docType.replace(/\s/g, '_');
+      const filters = [...App.state.docFilters];
+      const idx     = filters.indexOf(docType);
+      if (idx >= 0) filters.splice(idx, 1); else filters.push(docType);
+      App.setState({ docFilters: filters });
+      // Sync advanced-panel checkbox
+      const cb = document.getElementById(`dc-${key}`);
+      if (cb) cb.checked = filters.includes(docType);
+      // Sync quick-filter button appearance
+      const btn = document.getElementById(`qf-doc-${key}`);
+      if (btn) {
+        btn.classList.toggle('quick-filter-btn--active', filters.includes(docType));
+        btn.setAttribute('aria-pressed', String(filters.includes(docType)));
+      }
+      Views._updateClearButton();
+      Views._filterCandidates();
+    },
+
+    // ── Quick-filter: toggle a status ──
+    _toggleStatusFilter(status) {
+      const key     = status.replace(/\s/g, '_');
+      const filters = [...App.state.statusFilters];
+      const idx     = filters.indexOf(status);
+      if (idx >= 0) filters.splice(idx, 1); else filters.push(status);
+      App.setState({ statusFilters: filters });
+      const cb = document.getElementById(`sc-${key}`);
+      if (cb) cb.checked = filters.includes(status);
+      const btn = document.getElementById(`qf-status-${key}`);
+      if (btn) {
+        btn.classList.toggle('quick-filter-btn--active', filters.includes(status));
+        btn.setAttribute('aria-pressed', String(filters.includes(status)));
+      }
+      Views._updateClearButton();
+      Views._filterCandidates();
+    },
+
+    // ── Advanced panel: status checkboxes changed ──
+    _onStatusCheckChange() {
+      const checked = [...document.querySelectorAll('.status-check:checked')].map(el => el.value);
+      App.setState({ statusFilters: checked });
+      ['Visa Pending','Visa Completed','Mobilized','Documents Complete'].forEach(st => {
+        const btn = document.getElementById(`qf-status-${st.replace(/\s/g,'_')}`);
+        if (btn) {
+          btn.classList.toggle('quick-filter-btn--active', checked.includes(st));
+          btn.setAttribute('aria-pressed', String(checked.includes(st)));
+        }
+      });
+      Views._updateClearButton();
+      Views._filterCandidates();
+    },
+
+    // ── Advanced panel: document checkboxes changed ──
+    _onDocCheckChange() {
+      const checked = [...document.querySelectorAll('.doc-check:checked')].map(el => el.value);
+      App.setState({ docFilters: checked });
+      ['Passport','Photo','Academic Certificate','Medical','Visa','CV'].forEach(doc => {
+        const btn = document.getElementById(`qf-doc-${doc.replace(/\s/g,'_')}`);
+        if (btn) {
+          btn.classList.toggle('quick-filter-btn--active', checked.includes(doc));
+          btn.setAttribute('aria-pressed', String(checked.includes(doc)));
+        }
+      });
+      Views._updateClearButton();
+      Views._filterCandidates();
+    },
+
+    _onCompletionRange(value) {
+      const el = document.getElementById('completion-min-val');
+      if (el) el.textContent = value + '%';
+      Views._filterCandidates();
+    },
+
+    _toggleAdvancedFilters() {
+      const panel = document.getElementById('advanced-filter-panel');
+      const btn   = document.getElementById('adv-filter-btn');
+      if (!panel || !btn) return;
+      const wasHidden = panel.hidden;
+      panel.hidden = !wasHidden;
+      btn.setAttribute('aria-expanded', String(wasHidden));
+      btn.classList.toggle('btn--primary', wasHidden);
+      btn.classList.toggle('btn--outline', !wasHidden);
+    },
+
+    _clearAllFilters() {
+      App.setState({ statusFilters: [], docFilters: [], sortCol: '', sortDir: 'asc' });
+      document.querySelectorAll('.status-check, .doc-check').forEach(cb => { cb.checked = false; });
+      document.querySelectorAll('.quick-filter-btn').forEach(btn => {
+        btn.classList.remove('quick-filter-btn--active');
+        btn.setAttribute('aria-pressed', 'false');
+      });
+      const deptFilter = document.getElementById('dept-filter');
+      if (deptFilter) deptFilter.value = '';
+      const range = document.getElementById('completion-min');
+      if (range) range.value = '0';
+      const rangeVal = document.getElementById('completion-min-val');
+      if (rangeVal) rangeVal.textContent = '0%';
+      const searchInput = document.getElementById('search-input');
+      if (searchInput) searchInput.value = '';
+      Views._updateClearButton();
+      Views._filterCandidates();
+    },
+
+    _updateClearButton() {
+      const hasFilters = App.state.statusFilters.length > 0 || App.state.docFilters.length > 0;
+      const btn = document.getElementById('clear-filters-btn');
+      if (btn) btn.style.display = hasFilters ? '' : 'none';
+    },
+
+    _renderCandidatesTable(data) {
+      const count = document.getElementById('cands-count');
+      if (count) count.textContent = `${data.length} Candidate${data.length !== 1 ? 's' : ''}`;
+      const footer = document.getElementById('table-footer');
+      if (footer) footer.textContent = `Showing ${data.length} of ${App.state.candidates.length} candidates`;
+      document.getElementById('candidates-table').innerHTML = data.length
+        ? Views._candidateTableHtml(data)
+        : '<div class="table-empty"><div class="table-empty__icon">🔍</div>No candidates match your filters.</div>';
+    },
+
+    // ── Sortable column header HTML helper ──
+    _thSort(label, col) {
+      const { sortCol, sortDir } = App.state;
+      const active   = sortCol === col;
+      const arrow    = active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅';
+      const ariaSort = active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
+      return `<th scope="col" class="th--sortable${active ? ' th--sorted' : ''}"
+                  onclick="Views._sortBy('${col}')" aria-sort="${ariaSort}">${label}<span class="th-arrow" aria-hidden="true"> ${arrow}</span></th>`;
+    },
+
+    _candidateTableHtml(rows) {
+      const { docCompleteness } = App.state;
+
+      const trs = rows.map(c => {
+        const comp        = docCompleteness[c.CandidateID];
+        const pct         = comp?.pct ?? null;
+        const missingDocs = comp?.missingDocs ?? [];
+
+        const barColor = pct === null ? 'var(--text-muted)'
+                       : pct === 100  ? 'var(--success)'
+                       : pct >= 50    ? 'var(--primary)'
+                       : 'var(--warning)';
+
+        const completenessCell = pct !== null
+          ? `<div class="doc-progress-mini">
+               <div class="doc-progress-mini__bar-track"
+                    role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"
+                    aria-label="${pct}% document completeness">
+                 <div class="doc-progress-mini__bar-fill" style="width:${pct}%;background:${barColor}"></div>
+               </div>
+               <span class="doc-progress-mini__pct" style="color:${barColor}">${pct}%</span>
+             </div>`
+          : `<span class="doc-progress-mini__loading">Loading…</span>`;
+
+        const missingCell = pct === null
+          ? '<span class="doc-progress-mini__loading">…</span>'
+          : missingDocs.length > 0
+            ? `<div class="missing-chips">${missingDocs.map(d => `<span class="missing-chip">${escHtml(d)}</span>`).join('')}</div>`
+            : `<span class="doc-chip doc-chip--complete" style="font-size:.7rem;padding:2px 8px">✅ Complete</span>`;
+
+        return `
+        <tr>
+          <td>
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="width:34px;height:34px;border-radius:50%;background:var(--primary-light);color:var(--primary);display:grid;place-items:center;font-weight:700;font-size:.78rem;flex-shrink:0">${fmt.initials(c.FullName)}</div>
+              <div>
+                <div class="td-primary">${escHtml(c.FullName)}</div>
+                <div class="td-secondary">${escHtml(c.Email)}</div>
+              </div>
+            </div>
+          </td>
+          <td>${escHtml(c.Position)}</td>
+          <td>${escHtml(c.Department)}</td>
+          <td>${escHtml(c.Nationality)}</td>
+          <td>${statusBadge(c.CurrentStatus)}</td>
+          <td style="min-width:130px">${completenessCell}</td>
+          <td style="min-width:160px">${missingCell}</td>
+          <td style="white-space:nowrap">${fmt.date(c.CreatedAt)}</td>
+          <td>
+            <button class="btn btn--outline btn--sm"
+                    onclick="Router.navigate('candidate-detail',{selectedCandidate:${JSON.stringify(c).replace(/"/g, '&quot;')}})"
+                    aria-label="View ${escHtml(c.FullName)} details">View</button>
+          </td>
+        </tr>`;
+      }).join('');
+
+      return `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              ${Views._thSort('Candidate', 'FullName')}
+              <th scope="col">Position</th>
+              ${Views._thSort('Department', 'Department')}
+              <th scope="col">Nationality</th>
+              ${Views._thSort('Status', 'CurrentStatus')}
+              ${Views._thSort('Doc Completeness', 'pct')}
+              ${Views._thSort('Missing Documents', 'missingCount')}
+              ${Views._thSort('Created', 'CreatedAt')}
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>${trs}</tbody>
+        </table>
+      </div>`;
+    },
+
+    _exportCandidates() {
+      const data = App.state.filteredCandidates.length ? App.state.filteredCandidates : App.state.candidates;
+      const { docCompleteness } = App.state;
+      const baseHeaders = ['CandidateID', 'FullName', 'Position', 'Department', 'Email', 'Nationality', 'CurrentStatus', 'CreatedAt'];
+      const allHeaders  = [...baseHeaders, 'DocCompleteness%', 'MissingDocs'];
+      const csv = [
+        allHeaders.join(','),
+        ...data.map(c => {
+          const comp    = docCompleteness[c.CandidateID];
+          const pct     = comp?.pct ?? '';
+          const missing = (comp?.missingDocs ?? []).join('; ');
+          const baseRow = baseHeaders.map(h => `"${(c[h] || '').toString().replace(/"/g, '""""')}"`);
+          return [...baseRow, `"${pct}"`, `"${missing}"`].join(',');
+        })
+      ].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href = url; a.download = `candidates_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click(); URL.revokeObjectURL(url);
+      Toast.success('CSV exported successfully!');
+    },
+
+    // ── CANDIDATE DETAIL ───────────────────────
+    candidateDetail(container) {
+      const c = App.state.selectedCandidate;
+      if (!c) { Router.navigate('candidates'); return; }
+
+      const statusOptions = [
+        'New Candidate',
+        'Pending Passport',
+        'Pending Photo',
+        'Pending Academic Certificate',
+        'Pending Medical',
+        'Documents Complete',
+        'Visa Pending',
+        'Visa Completed',
+        'Mobilized',
+        'Closed'
+      ];
+
+      container.innerHTML = `
+      <div class="page-header">
+        <div>
+          <button class="btn btn--ghost btn--sm" onclick="Router.navigate('candidates')" style="margin-bottom:var(--sp-2);padding-left:0">
+            ← Back to Candidates
+          </button>
+          <h1 class="page-header__title">${escHtml(c.FullName)}</h1>
+          <p class="page-header__sub">${escHtml(c.Position)} · ${escHtml(c.Department)} · ${statusBadge(c.CurrentStatus)}</p>
+        </div>
+        <div class="page-header__actions">
+          <button class="btn btn--outline btn--sm" onclick="Views._openEditProfileModal('${escHtml(c.CandidateID)}')">
+            ✏️ Edit Profile
+          </button>
+          <button class="btn btn--outline btn--sm" onclick="Views._openStatusModal('${escHtml(c.CandidateID)}','${escHtml(c.FullName)}')">
+            🔄 Update Status
+          </button>
+          <button class="btn btn--primary" onclick="Views._openUploadModal('${escHtml(c.CandidateID)}','${escHtml(c.DriveFolderID || '')}')">
+            📤 Upload Document
+          </button>
+        </div>
+      </div>
+
+      <!-- Info Cards -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:var(--sp-3);margin-bottom:var(--sp-4)">
+        ${Views._infoChip('Email', c.Email)}
+        ${Views._infoChip('Phone', c.Phone)}
+        ${Views._infoChip('Nationality', c.Nationality)}
+        ${Views._infoChip('Salary', c.OfferSalary ? c.OfferSalary + ' OMR' : '—')}
+        ${Views._infoChip('Joined', fmt.date(c.CreatedAt))}
+        ${Views._infoChip('Notes', c.Notes)}
+        ${Views._infoChip('Drive Folder', c.DriveFolderID
+        ? `<a href="https://drive.google.com/drive/folders/${escHtml(c.DriveFolderID)}" target="_blank" rel="noopener">Open Folder ↗</a>`
+        : '<em style="color:var(--text-muted)">No folder yet</em>')}
+      </div>
+
+      <!-- Document Completeness Panel -->
+      <div class="doc-completeness" id="doc-completeness" style="margin-bottom:var(--sp-3)">
+        <div class="loading-overlay"><div class="spinner spinner--dark"></div>Calculating completeness…</div>
+      </div>
+
+      <!-- Documents Section -->
+      <div class="table-card" style="margin-bottom:var(--sp-4)">
+        <div class="table-toolbar">
+          <span class="table-toolbar__title">📎 Documents</span>
+        </div>
+        <div id="docs-section" style="padding:var(--sp-3)">
+          <div class="loading-overlay"><div class="spinner spinner--dark"></div>Loading documents…</div>
+        </div>
+      </div>
+
+      <!-- Audit Log Section -->
+      <div class="table-card">
+        <div class="table-toolbar">
+          <span class="table-toolbar__title">📋 Audit Log</span>
+        </div>
+        <div id="audit-section" style="padding:var(--sp-3)">
+          <div class="loading-overlay"><div class="spinner spinner--dark"></div>Loading log…</div>
+        </div>
+      </div>`;
+
+      Views._loadCandidateDocuments(c.CandidateID);
+      Views._loadCandidateAudit(c.CandidateID);
+    },
+
+    _infoChip(label, value) {
+      return `
+      <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--sp-3)">
+        <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:4px">${label}</div>
+        <div style="font-size:.9rem;font-weight:600">${value || '—'}</div>
+      </div>`;
+    },
+
+    async _loadCandidateDocuments(candidateId) {
+      // Required documents for completeness calculation
+      const REQUIRED_DOCS = ['Passport', 'Photo', 'Academic Certificate', 'Medical', 'Visa', 'CV'];
+
+      try {
+        const res = await GAS.call('api_getDocumentsByCandidate', candidateId);
+        if (!res.success) throw new Error(res.error);
+        const docs = res.data;
+        const el = document.getElementById('docs-section');
+
+        // ── Document Completeness Panel ──────────────────────────────────
+        const completenessEl = document.getElementById('doc-completeness');
+        if (completenessEl) {
+          // Map uploaded doc types (normalise for comparison)
+          const uploadedTypes = new Set(
+            docs
+              .filter(d => d.ApprovalStatus !== 'Rejected')
+              .map(d => (d.DocType || '').trim())
+          );
+
+          // Determine which required docs are present
+          const presentDocs  = REQUIRED_DOCS.filter(req => uploadedTypes.has(req));
+          const missingDocs  = REQUIRED_DOCS.filter(req => !uploadedTypes.has(req));
+          const completedCount = presentDocs.length;
+          const totalCount     = REQUIRED_DOCS.length;
+          const pct            = Math.round((completedCount / totalCount) * 100);
+
+          // Derive suggested auto-status
+          let suggestedStatus = '';
+          if (!uploadedTypes.has('Passport'))             suggestedStatus = 'Pending Passport';
+          else if (!uploadedTypes.has('Photo'))           suggestedStatus = 'Pending Photo';
+          else if (!uploadedTypes.has('Academic Certificate')) suggestedStatus = 'Pending Academic Certificate';
+          else if (!uploadedTypes.has('Medical'))         suggestedStatus = 'Pending Medical';
+          else                                            suggestedStatus = 'Documents Complete';
+
+          // Determine bar colour
+          const barColor = pct === 100 ? 'var(--success)'
+                         : pct >= 50   ? 'var(--primary)'
+                         : 'var(--warning)';
+
+          completenessEl.innerHTML = `
+          <div class="doc-completeness__inner">
+            <div class="doc-completeness__header">
+              <span class="doc-completeness__title">📋 Document Completeness</span>
+              <span class="doc-completeness__pct" style="color:${barColor}">${pct}%</span>
+            </div>
+            <div class="doc-completeness__bar-track" role="progressbar"
+                 aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"
+                 aria-label="Document completeness ${pct}%">
+              <div class="doc-completeness__bar-fill" style="width:${pct}%;background:${barColor}"></div>
+            </div>
+            <div class="doc-completeness__meta">
+              <span>${completedCount} of ${totalCount} documents uploaded</span>
+              ${suggestedStatus ? `<span>Suggested status: ${statusBadge(suggestedStatus)}</span>` : ''}
+            </div>
+            ${missingDocs.length ? `
+            <div class="doc-completeness__missing">
+              <span class="doc-completeness__missing-label">Missing:</span>
+              ${missingDocs.map(d => `<span class="doc-chip doc-chip--missing">⚠ ${escHtml(d)}</span>`).join('')}
+            </div>` : `
+            <div class="doc-completeness__missing">
+              <span class="doc-chip doc-chip--complete">✅ All required documents uploaded</span>
+            </div>`}
+          </div>`;
+        }
+
+        // ── Documents List ───────────────────────────────────────────────
+        if (!el) return;
+
+        if (!docs.length) {
+          el.innerHTML = '<div class="table-empty"><div class="table-empty__icon">📭</div>No documents uploaded yet.</div>';
+          return;
+        }
+
+        el.innerHTML = docs.map(d => `
+        <div class="doc-row">
+          <div class="doc-row__icon" aria-hidden="true">${d.FileName?.endsWith('.pdf') ? '📄' : '🖼️'}</div>
+          <div class="doc-row__info">
+            <div class="doc-row__name">${escHtml(d.DocType)} — v${d.VersionNumber || 1}</div>
+            <div class="doc-row__meta">${escHtml(d.FileName)} · Uploaded ${fmt.date(d.UploadDate)}</div>
+          </div>
+          <div style="margin:0 var(--sp-2)">${statusBadge(d.ApprovalStatus)}</div>
+          <div class="doc-row__actions">
+            ${d.FileURL && d.FileURL !== '#' ? `<a href="${escHtml(d.FileURL)}" target="_blank" rel="noopener" class="btn btn--outline btn--sm" aria-label="View ${escHtml(d.DocType)}">View ↗</a>` : ''}
+          </div>
+        </div>`).join('');
+      } catch (err) {
+        const el = document.getElementById('docs-section');
+        if (el) el.innerHTML = `<div class="table-empty">⚠️ ${escHtml(err.message)}</div>`;
+        const completenessEl = document.getElementById('doc-completeness');
+        if (completenessEl) completenessEl.innerHTML = '';
+      }
+    },
+
+    async _loadCandidateAudit(candidateId) {
+      try {
+        const res = await GAS.call('api_getAuditLog', candidateId);
+        if (!res.success) throw new Error(res.error);
+        const el = document.getElementById('audit-section');
+        if (!el) return;
+
+        if (!res.data.length) {
+          el.innerHTML = '<div class="table-empty"><div class="table-empty__icon">📋</div>No audit entries.</div>';
+          return;
+        }
+
+        el.innerHTML = `<div class="timeline">
+        ${res.data.slice().reverse().map(log => `
+          <div class="timeline__item">
+            <div class="timeline__time">${fmt.dateTime(log.Timestamp)}</div>
+            <div class="timeline__event">${escHtml(log.Event)}</div>
+            <div class="timeline__actor">by ${escHtml(log.Actor)}</div>
+          </div>`).join('')}
+      </div>`;
+      } catch (err) {
+        const el = document.getElementById('audit-section');
+        if (el) el.innerHTML = `<div class="table-empty">⚠️ ${escHtml(err.message)}</div>`;
+      }
+    },
+
+
+    _openStatusModal(candidateId, candidateName) {
+      const options = [
+        'New Candidate',
+        'Pending Passport',
+        'Pending Photo',
+        'Pending Academic Certificate',
+        'Pending Medical',
+        'Documents Complete',
+        'Visa Pending',
+        'Visa Completed',
+        'Mobilized',
+        'Closed'
+      ];
+      Modal.open(`
+      <div class="modal__header">
+        <h2 class="modal__title">🔄 Update Status</h2>
+        <button class="modal__close" onclick="Modal.close()" aria-label="Close">✕</button>
+      </div>
+      <div class="modal__body">
+        <p style="margin-bottom:var(--sp-3);color:var(--text-secondary)">Update mobilization status for <strong>${escHtml(candidateName)}</strong></p>
+        <div class="form-group">
+          <label class="form-label" for="new-status">New Status <span class="required">*</span></label>
+          <select class="form-select" id="new-status">
+            ${options.map(o => `<option value="${o}">${o}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="modal__footer">
+        <button class="btn btn--outline" onclick="Modal.close()">Cancel</button>
+        <button class="btn btn--primary" onclick="Views._submitStatus('${candidateId}')">Save Status</button>
+      </div>`);
+    },
+
+    async _submitStatus(candidateId) {
+      const newStatus = document.getElementById('new-status')?.value;
+      if (!newStatus) return;
+      Modal.close();
+      try {
+        const res = await GAS.call('api_updateCandidateStatus', candidateId, newStatus);
+        if (!res.success) throw new Error(res.error);
+        // Update local state
+        const cand = App.state.candidates.find(c => c.CandidateID === candidateId);
+        if (cand) cand.CurrentStatus = newStatus;
+        if (App.state.selectedCandidate?.CandidateID === candidateId)
+          App.state.selectedCandidate.CurrentStatus = newStatus;
+        Toast.success('Status updated to: ' + newStatus);
+        Router.navigate('candidate-detail');
+      } catch (err) {
+        Toast.error('Update failed: ' + err.message);
+      }
+    },
+
+    _openEditProfileModal(candidateId) {
+      const c = App.state.candidates.find(cand => cand.CandidateID === candidateId);
+      if (!c) return;
+
+      Modal.open(`
+      <div class="modal__header">
+        <h2 class="modal__title">✏️ Edit Profile</h2>
+        <button class="modal__close" onclick="Modal.close()" aria-label="Close">✕</button>
+      </div>
+      <div class="modal__body">
+        <p style="margin-bottom:var(--sp-3);color:var(--text-secondary)">Editing details for <strong>${escHtml(c.FullName)}</strong></p>
+        <div class="form-grid">
+          <div class="form-group col-span-2">
+            <label class="form-label" for="edit-phone">Phone Number <span class="required">*</span></label>
+            <input type="tel" class="form-input" id="edit-phone" value="${escHtml(c.Phone || '')}" required />
+          </div>
+          <div class="form-group col-span-2">
+            <label class="form-label" for="edit-notes">Notes</label>
+            <textarea class="form-textarea" id="edit-notes" rows="4" placeholder="Add additional instructions or remarks...">${escHtml(c.Notes || '')}</textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal__footer">
+        <button class="btn btn--outline" onclick="Modal.close()">Cancel</button>
+        <button class="btn btn--primary" id="edit-save-btn" onclick="Views._submitEditProfile('${candidateId}')">Save Changes</button>
+      </div>`);
+    },
+
+    async _submitEditProfile(candidateId) {
+      const phone = document.getElementById('edit-phone')?.value?.trim();
+      const notes = document.getElementById('edit-notes')?.value?.trim();
+
+      if (!phone) { Toast.warning('Phone number is required.'); return; }
+
+      const btn = document.getElementById('edit-save-btn');
+      btn.disabled = true;
+      btn.innerHTML = 'Saving...';
+
+      try {
+        const res = await GAS.call('api_updateCandidateDetails', candidateId, { phone, notes });
+        if (!res.success) throw new Error(res.error);
+
+        // Update local state
+        const cand = App.state.candidates.find(c => c.CandidateID === candidateId);
+        if (cand) {
+          cand.Phone = phone;
+          cand.Notes = notes;
+        }
+        if (App.state.selectedCandidate?.CandidateID === candidateId) {
+          App.state.selectedCandidate.Phone = phone;
+          App.state.selectedCandidate.Notes = notes;
+        }
+
+        Modal.close();
+        Toast.success('Profile updated successfully!');
+        Router.navigate('candidate-detail'); // Re-render detail view to show new values
+      } catch (err) {
+        Toast.error('Failed to update: ' + err.message);
+        btn.disabled = false;
+        btn.innerHTML = 'Save Changes';
+      }
+    },
+
+    _openUploadModal(candidateId, folderId) {
+      const docTypes = ['Passport', 'Photo', 'Academic Certificate', 'Medical', 'Visa', 'CV', 'Other'];
+      Modal.open(`
+      <div class="modal__header">
+        <h2 class="modal__title">📤 Upload Document</h2>
+        <button class="modal__close" onclick="Modal.close()" aria-label="Close">✕</button>
+      </div>
+      <div class="modal__body">
+        <div class="form-grid" style="gap:var(--sp-3)">
+          <div class="form-group col-span-2">
+            <label class="form-label" for="doc-type">Document Type <span class="required">*</span></label>
+            <select class="form-select" id="doc-type">
+              ${docTypes.map(t => `<option value="${t}">${t}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group col-span-2">
+            <label class="form-label">File <span class="required">*</span></label>
+            <div class="upload-zone" id="upload-zone">
+              <input type="file" id="upload-file" accept=".pdf,.jpg,.jpeg,.png"
+                     aria-label="Select document file"
+                     onchange="Views._onFileSelect(this)">
+              <div class="upload-zone__icon" aria-hidden="true">📁</div>
+              <div class="upload-zone__label" id="upload-label">Click to select or drag & drop</div>
+              <div class="upload-zone__hint">PDF, JPG, PNG — max 10 MB</div>
+            </div>
+          </div>
+        </div>
+        <div id="upload-progress" style="display:none;margin-top:var(--sp-3)">
+          <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+            <div id="upload-bar" style="height:100%;width:0;background:var(--primary);transition:width .3s ease"></div>
+          </div>
+          <p style="font-size:.8rem;color:var(--text-secondary);margin-top:6px" id="upload-status-msg">Preparing…</p>
+        </div>
+      </div>
+      <div class="modal__footer">
+        <button class="btn btn--outline" onclick="Modal.close()">Cancel</button>
+        <button class="btn btn--primary" id="upload-btn"
+                onclick="Views._submitUpload('${candidateId}','${folderId}')">Upload</button>
+      </div>`);
+    },
+
+    _onFileSelect(input) {
+      const file = input.files[0];
+      if (file) {
+        document.getElementById('upload-label').textContent = `📎 ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+      }
+    },
+
+    async _submitUpload(candidateId, folderId) {
+      const fileInput = document.getElementById('upload-file');
+      const docType = document.getElementById('doc-type')?.value;
+      const file = fileInput?.files[0];
+
+      if (!file) { Toast.warning('Please select a file.'); return; }
+      if (file.size > 10 * 1024 * 1024) { Toast.warning('File exceeds 10 MB limit.'); return; }
+
+      const btn = document.getElementById('upload-btn');
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner"></span> Uploading…`;
+
+      const progress = document.getElementById('upload-progress');
+      const bar = document.getElementById('upload-bar');
+      const statusMsg = document.getElementById('upload-status-msg');
+      progress.style.display = 'block';
+
+      try {
+        // Read file as base64
+        statusMsg.textContent = 'Reading file…';
+        bar.style.width = '20%';
+
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = e => resolve(e.target.result.split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+        statusMsg.textContent = 'Uploading to Google Drive…';
+        bar.style.width = '60%';
+
+        // Ensure folder exists
+        let actualFolderId = folderId;
+        if (!actualFolderId) {
+          const cand = App.state.selectedCandidate;
+          const folderRes = await GAS.call('api_createCandidateFolder', candidateId, cand?.FullName || candidateId);
+          if (!folderRes.success) throw new Error(folderRes.error);
+          actualFolderId = folderRes.folderId;
+        }
+
+        const res = await GAS.call('api_uploadFileToDrive', candidateId, actualFolderId, docType, file.name, base64, file.type);
+        if (!res.success) throw new Error(res.error);
+
+        bar.style.width = '100%';
+        statusMsg.textContent = 'Complete!';
+
+        setTimeout(() => {
+          Modal.close();
+          Toast.success(`${docType} uploaded successfully!`);
+          Views._loadCandidateDocuments(candidateId);
+          Views._loadCandidateAudit(candidateId);
+        }, 500);
+      } catch (err) {
+        Toast.error('Upload failed: ' + err.message);
+        btn.disabled = false;
+        btn.innerHTML = 'Upload';
+        progress.style.display = 'none';
+      }
+    },
+
+    // ── NEW CANDIDATE FORM ─────────────────────
+    newCandidate(container) {
+      container.innerHTML = `
+      <div class="page-header">
+        <div>
+          <button class="btn btn--ghost btn--sm" onclick="Router.navigate('candidates')" style="margin-bottom:var(--sp-2);padding-left:0">
+            ← Back to Candidates
+          </button>
+          <h1 class="page-header__title">New Candidate</h1>
+          <p class="page-header__sub">Register a new candidate and initiate the mobilization process</p>
+        </div>
+      </div>
+
+      <!-- Workflow Steps -->
+      <div class="steps" role="list" aria-label="Registration steps">
+        <div class="step active" role="listitem"><div class="step__circle">1</div><div class="step__label">Basic Info</div></div>
+        <div class="step" role="listitem"><div class="step__circle">2</div><div class="step__label">Contract</div></div>
+        <div class="step" role="listitem"><div class="step__circle">3</div><div class="step__label">Send Invite</div></div>
+      </div>
+
+      <div class="table-card">
+        <div class="table-toolbar">
+          <span class="table-toolbar__title">Candidate Information</span>
+        </div>
+        <div style="padding:var(--sp-4)">
+          <form id="new-candidate-form" onsubmit="Views._submitNewCandidate(event)">
+            <div class="form-grid">
+              <div class="form-group">
+                <label class="form-label" for="nc-name">Full Name <span class="required">*</span></label>
+                <input class="form-input" type="text" id="nc-name" required placeholder="Ahmed Ali" autocomplete="name">
+                <span class="form-error" id="err-name"></span>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="nc-email">Email Address <span class="required">*</span></label>
+                <input class="form-input" type="email" id="nc-email" required placeholder="ahmed@example.com" autocomplete="email">
+                <span class="form-error" id="err-email"></span>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="nc-phone">Phone Number <span class="required">*</span></label>
+                <input class="form-input" type="tel" id="nc-phone" required placeholder="+201012345678">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="nc-nationality">Nationality <span class="required">*</span></label>
+                <select class="form-select" id="nc-nationality" required>
+                  <option value="">Select nationality…</option>
+                  <option>Egyptian</option><option>Sudanese</option><option>Jordanian</option>
+                  <option>Saudi</option><option>Yemeni</option><option>Moroccan</option><option>Other</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="nc-position">Job Position <span class="required">*</span></label>
+                <input class="form-input" type="text" id="nc-position" required placeholder="Civil Engineer">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="nc-department">Department <span class="required">*</span></label>
+                <select class="form-select" id="nc-department" required>
+                  <option value="">Select department…</option>
+                  <option>Projects</option><option>Maintenance</option><option>Finance</option>
+                  <option>HR</option><option>Operations</option><option>IT</option><option>Safety</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="nc-salary">Salary (OMR) <span class="required">*</span></label>
+                <input class="form-input" type="number" id="nc-salary" required placeholder="350" min="0" step="0.5">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="nc-coordinator">Assigned Coordinator Email</label>
+                <input class="form-input" type="email" id="nc-coordinator" placeholder="coordinator@company.com">
+              </div>
+            </div>
+
+            <div style="margin-top:var(--sp-4);display:flex;gap:var(--sp-2);justify-content:flex-end">
+              <button type="button" class="btn btn--outline" onclick="Router.navigate('candidates')">Cancel</button>
+              <button type="submit" class="btn btn--primary" id="submit-btn">
+                ＋ Create Candidate
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>`;
+    },
+
+    async _submitNewCandidate(e) {
+      e.preventDefault();
+      const btn = document.getElementById('submit-btn');
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner"></span> Creating…`;
+
+      const payload = {
+        fullName: document.getElementById('nc-name').value.trim(),
+        email: document.getElementById('nc-email').value.trim(),
+        phone: document.getElementById('nc-phone').value.trim(),
+        nationality: document.getElementById('nc-nationality').value,
+        position: document.getElementById('nc-position').value.trim(),
+        department: document.getElementById('nc-department').value,
+        salary: document.getElementById('nc-salary').value,
+        coordinatorEmail: document.getElementById('nc-coordinator').value.trim() || App.state.currentUser.email
+      };
+
+      try {
+        const res = await GAS.call('api_createCandidate', payload);
+        if (!res.success) throw new Error(res.error);
+
+        // Auto-create Drive folder
+        await GAS.call('api_createCandidateFolder', res.candidateId, payload.fullName);
+
+        Toast.success(`✅ ${payload.fullName} registered!`);
+        // Refresh candidates list
+        const allRes = await GAS.call('api_getAllCandidates');
+        if (allRes.success) App.setState({ candidates: allRes.data });
+        Router.navigate('candidates');
+      } catch (err) {
+        Toast.error('Failed to create candidate: ' + err.message);
+        btn.disabled = false;
+        btn.innerHTML = '＋ Create Candidate';
+      }
+    },
+
+    // ── AUDIT LOG (Global) ─────────────────────
+    auditLog(container) {
+      container.innerHTML = `
+      <div class="page-header">
+        <div>
+          <h1 class="page-header__title">Audit Log</h1>
+          <p class="page-header__sub">Complete system activity history across all candidates</p>
+        </div>
+      </div>
+      <div class="table-card">
+        <div class="table-toolbar">
+          <span class="table-toolbar__title">All System Events</span>
+          <div class="table-toolbar__actions">
+            <div class="search-input">
+              <span class="search-input__icon" aria-hidden="true">🔍</span>
+              <input type="search" id="audit-search" placeholder="Search candidate…"
+                     aria-label="Search audit log" oninput="Views._filterAudit()">
+            </div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="audit-table">
+            <thead>
+              <tr>
+                <th scope="col">Timestamp</th>
+                <th scope="col">Candidate ID</th>
+                <th scope="col">Actor</th>
+                <th scope="col">Event</th>
+              </tr>
+            </thead>
+            <tbody id="audit-tbody">
+              <tr><td colspan="4"><div class="loading-overlay"><div class="spinner spinner--dark"></div>Loading…</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+
+      Views._loadAllAuditLogs();
+    },
+
+    _allLogs: [],
+
+    async _loadAllAuditLogs() {
+      try {
+        const candsRes = await GAS.call('api_getAllCandidates');
+        if (!candsRes.success) throw new Error(candsRes.error);
+        const cands = candsRes.data.slice(0, 20); // limit for performance
+
+        const logPromises = cands.map(c => GAS.call('api_getAuditLog', c.CandidateID));
+        const results = await Promise.all(logPromises);
+
+        Views._allLogs = results.flatMap((r, i) =>
+          r.success ? r.data.map(l => ({ ...l, _candidateName: cands[i].FullName })) : []
+        ).sort((a, b) => new Date(b.Timestamp) - new Date(a.Timestamp));
+
+        Views._renderAuditTable(Views._allLogs);
+      } catch (err) {
+        document.getElementById('audit-tbody').innerHTML =
+          `<tr><td colspan="4"><div class="table-empty">⚠️ ${escHtml(err.message)}</div></td></tr>`;
+        Toast.error('Failed to load audit log.');
+      }
+    },
+
+    _filterAudit() {
+      const q = document.getElementById('audit-search')?.value?.toLowerCase() || '';
+      const filtered = q
+        ? Views._allLogs.filter(l => l._candidateName?.toLowerCase().includes(q) || l.Event?.toLowerCase().includes(q) || l.Actor?.toLowerCase().includes(q))
+        : Views._allLogs;
+      Views._renderAuditTable(filtered);
+    },
+
+    _renderAuditTable(logs) {
+      const tbody = document.getElementById('audit-tbody');
+      if (!tbody) return;
+      tbody.innerHTML = logs.length
+        ? logs.map(l => `
+          <tr>
+            <td style="white-space:nowrap">${fmt.dateTime(l.Timestamp)}</td>
+            <td>
+              <span style="font-size:.78rem;font-family:monospace;color:var(--text-secondary)">${escHtml((l.CandidateID || '').slice(0, 8))}…</span>
+              ${l._candidateName ? `<div style="font-size:.78rem;color:var(--text-muted)">${escHtml(l._candidateName)}</div>` : ''}
+            </td>
+            <td>${escHtml(l.Actor)}</td>
+            <td>${escHtml(l.Event)}</td>
+          </tr>`).join('')
+        : `<tr><td colspan="4"><div class="table-empty"><div class="table-empty__icon">📋</div>No log entries found.</div></td></tr>`;
+    }
+  };
+
+  // ─────────────────────────────────────────────
+  // APP INIT
+  // ─────────────────────────────────────────────
+
+  const initApp = () => {
+    // Resolve current user email if in GAS environment
+    if (GAS.isLive && typeof google !== 'undefined') {
+      try {
+        // Attempt to pre-fetch user info (non-blocking)
+      } catch (_) { }
+    }
+
+    // Initialize sidebar state
+    const savedSidebar = localStorage.getItem('hr_sidebar_collapsed');
+    const shouldCollapse = savedSidebar === 'true' || window.innerWidth < 768;
+    App.toggleSidebar(shouldCollapse);
+
+    // Auto-collapse on small screens during resize
+    window.addEventListener('resize', () => {
+      if (window.innerWidth < 768 && !App.state.sidebarCollapsed) {
+        App.toggleSidebar(true);
+      }
+    });
+
+    renderTopbar();
+    renderSidebar();
+    Router.navigate('candidates');
+  };
+
+  document.addEventListener('DOMContentLoaded', initApp);
+</script>
