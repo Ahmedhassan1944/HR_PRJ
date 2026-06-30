@@ -985,4 +985,65 @@
   .trend { display: inline-flex; align-items: center; gap: 2px; font-size: .75rem; font-weight: 600; }
   .trend--up   { color: var(--success); }
   .trend--down { color: var(--danger); }
+/* ── KPI Section Labels ─────────────────────────────────── */
+.kpi-section-label {
+  font-size: .78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  margin-bottom: var(--sp-2);
+  padding-left: 2px;
+}
+
+/* ── Clickable KPI Card ─────────────────────────────────── */
+.kpi-card--clickable {
+  cursor: pointer;
+  position: relative;
+  transition: transform .15s ease, box-shadow .15s ease, outline .1s ease;
+}
+.kpi-card--clickable:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 18px rgba(0,0,0,.14);
+}
+.kpi-card--clickable:active {
+  transform: translateY(0);
+}
+
+/* ── Selected KPI Card (CTRL+Click) ─────────────────────── */
+.kpi-card--selected {
+  outline: 3px solid var(--primary);
+  outline-offset: 2px;
+}
+.kpi-card--selected .kpi-card__selected-ring {
+  position: absolute;
+  top: 6px; right: 6px;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--primary);
+  border: 2px solid #fff;
+}
+.kpi-card__selected-ring { display: none; }
+.kpi-card--selected .kpi-card__selected-ring { display: block; }
+/* ── Dashboard Export Dropdown ───────────────────────────── */
+.dash-export-item {
+  display: block;
+  width: 100%;
+  padding: 9px 16px;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: .88rem;
+  color: var(--text-primary);
+  white-space: nowrap;
+  transition: background .12s;
+}
+.dash-export-item:hover {
+  background: var(--primary-light);
+  color: var(--primary-dark);
+}
+.dash-export-item + .dash-export-item {
+  border-top: 1px solid var(--border);
+}
 </style>

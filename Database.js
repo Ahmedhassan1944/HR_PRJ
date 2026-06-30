@@ -193,7 +193,25 @@ function api_getDocumentsByCandidate(candidateId) {
   }
 }
 
-
+/**
+ * Returns ALL document records across all candidates.
+ * Used by api_getDashboardData for doc-level KPI aggregation.
+ */
+function api_getAllDocuments() {
+  try {
+    const sheet = getSheet_(SHEET_DOCUMENTS);
+    const [headers, ...rows] = sheet.getDataRange().getValues();
+    const documents = rows.map(row => {
+      const obj = {};
+      headers.forEach((h, i) => obj[h] = row[i]);
+      return obj;
+    });
+    return { success: true, data: documents };
+  } catch (e) {
+    Logger.log(e);
+    return { success: false, error: e.message };
+  }
+}
 
 // ─────────────────────────────────────────────
 // AUDIT LOG

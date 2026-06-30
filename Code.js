@@ -29,54 +29,123 @@ function include(filename) {
  */
 
 /**
- * Fetches and aggregates dashboard KPI data from the Candidates sheet.
- * Statuses covered:
- *   Missing Docs  → New Candidate | Documents Requested | Pending Passport |
- *                   Pending Photo | Pending Academic Certificate | Pending Medical
- *   Visa Pending  → Visa Pending
- *   Visa Completed→ Visa Completed
- *   Mobilized     → Mobilized
- *   Active Cases  → everything except Closed
+ * Fetches and aggregates ALL dashboard KPI data.
+ *
+ * Status-based KPIs (from tbl_Candidates):
+ *   activeCount         → all candidates except Closed
+ *   missingDocs         → New Candidate | Documents Requested | Documents Under Preparing |
+ *                         Pending Passport | Pending Photo | Pending Academic Certificate |
+ *                         Pending Medical | Booked a medical examination
+ *   visaPending         → Visa Pending
+ *   visaCompleted       → Visa Completed
+ *   mobilized           → Mobilized
+ *   pendingMedical      → Pending Medical
+ *   bookedMedical       → Booked a medical examination
+ *   docsUnderPreparing  → Documents Under Preparing
+ *
+ * Document-based KPIs (from tbl_Documents, per candidate):
+ *   hasPassport, hasPhoto, hasAcademicCert,
+ *   hasMedicalExam, hasMedicalAnalysis, hasVisa, hasCV
+ *   → count of candidates who HAVE that doc (ApprovalStatus !== 'Rejected')
+ *
+ *   missingPassport, missingPhoto, missingAcademicCert,
+ *   missingMedicalExam, missingMedicalAnalysis, missingVisa, missingCV
+ *   → count of candidates who are MISSING that doc
  */
 function api_getDashboardData() {
   try {
-    const res = api_getAllCandidates();
-    if (!res.success) throw new Error(res.error);
-
+    const candsRes = api_getAllCandidates();
+    if (!candsRes.success) throw new Error(candsRes.error);
+    const docsRes  = api_getAllDocuments();
+    if (!docsRes.success) throw new Error(docsRes.error);
+    const candidates = candsRes.data;
+    const allDocs    = docsRes.data;
+    // ── Status-based counters ──────────────────────────────────────
     const MISSING_DOC_STATUSES = new Set([
       'New Candidate',
       'Documents Requested',
+      'Documents Under Preparing',
       'Pending Passport',
       'Pending Photo',
       'Pending Academic Certificate',
-      'Pending Medical'
+      'Pending Medical',
+      'Booked a medical examination'
     ]);
-
-    let activeCount    = 0;
-    let missingDocs    = 0;
-    let visaPending    = 0;
-    let visaCompleted  = 0;
-    let mobilized      = 0;
-
-    res.data.forEach(cand => {
+    let activeCount        = 0;
+    let missingDocs        = 0;
+    let visaPending        = 0;
+    let visaCompleted      = 0;
+    let mobilized          = 0;
+    let pendingMedical     = 0;
+    let bookedMedical      = 0;
+    let docsUnderPreparing = 0;
+    candidates.forEach(cand => {
       const status = (cand.CurrentStatus || '').trim();
-
       if (status !== 'Closed') activeCount++;
-
-      if (MISSING_DOC_STATUSES.has(status))  missingDocs++;
-      else if (status === 'Visa Pending')     visaPending++;
-      else if (status === 'Visa Completed')   visaCompleted++;
-      else if (status === 'Mobilized')        mobilized++;
+      if (MISSING_DOC_STATUSES.has(status))           missingDocs++;
+      if (status === 'Visa Pending')                   visaPending++;
+      if (status === 'Visa Completed')                 visaCompleted++;
+      if (status === 'Mobilized')                      mobilized++;
+      if (status === 'Pending Medical')                pendingMedical++;
+      if (status === 'Booked a medical examination')   bookedMedical++;
+      if (status === 'Documents Under Preparing')      docsUnderPreparing++;
     });
-
+    // ── Document-based counters ────────────────────────────────────
+    // Build a Set of {CandidateID}_{DocType} for approved/pending docs
+    const REQUIRED_DOCS = [
+      'Passport', 'Photo', 'Academic Certificate',
+      'Medical Examination', 'Medical Analysis', 'Visa', 'CV'
+    ];
+    // Map: candidateId → Set of docTypes they HAVE (not Rejected)
+    const candDocMap = {};
+    candidates.forEach(c => { candDocMap[c.CandidateID] = new Set(); });
+    allDocs.forEach(doc => {
+      if ((doc.ApprovalStatus || '').trim() !== 'Rejected') {
+        const key = (doc.CandidateID || '').trim();
+        if (candDocMap[key]) {
+          candDocMap[key].add((doc.DocType || '').trim());
+        }
+      }
+    });
+    // Count has/missing per docType across all candidates
+    const hasCount     = {};
+    const missingCount = {};
+    REQUIRED_DOCS.forEach(dt => { hasCount[dt] = 0; missingCount[dt] = 0; });
+    candidates.forEach(cand => {
+      const myDocs = candDocMap[cand.CandidateID] || new Set();
+      REQUIRED_DOCS.forEach(dt => {
+        if (myDocs.has(dt)) hasCount[dt]++;
+        else                missingCount[dt]++;
+      });
+    });
     return {
       success: true,
       data: {
-        activeCount:   activeCount,
-        missingDocs:   missingDocs,
-        visaPending:   visaPending,
-        visaCompleted: visaCompleted,
-        mobilized:     mobilized,
+        // Status-based
+        activeCount,
+        missingDocs,
+        visaPending,
+        visaCompleted,
+        mobilized,
+        pendingMedical,
+        bookedMedical,
+        docsUnderPreparing,
+        // Document HAS counts
+        hasPassport:      hasCount['Passport'],
+        hasPhoto:         hasCount['Photo'],
+        hasAcademicCert:  hasCount['Academic Certificate'],
+        hasMedicalExam:   hasCount['Medical Examination'],
+        hasMedicalAnalysis: hasCount['Medical Analysis'],
+        hasVisa:          hasCount['Visa'],
+        hasCV:            hasCount['CV'],
+        // Document MISSING counts
+        missingPassport:       missingCount['Passport'],
+        missingPhoto:          missingCount['Photo'],
+        missingAcademicCert:   missingCount['Academic Certificate'],
+        missingMedicalExam:    missingCount['Medical Examination'],
+        missingMedicalAnalysis:missingCount['Medical Analysis'],
+        missingVisa:           missingCount['Visa'],
+        missingCV:             missingCount['CV'],
         msg: 'Live data successfully retrieved from Google Sheets.'
       }
     };
