@@ -33,8 +33,9 @@
       // ── Candidates table state ───────────────────────────────
       sortCol: '',           // column key to sort by
       sortDir: 'asc',        // 'asc' | 'desc'
-      statusFilters: [],     // [] = all; otherwise array of status strings
-      docFilters: [],        // array of doc-type strings meaning "missing these"
+      statusFilters: [],        // [] = all; otherwise array of status strings to INCLUDE
+      excludeStatusFilters: [], // [] = none excluded; otherwise statuses to HIDE
+      docFilters: [],           // array of doc-type strings meaning "missing these"
       sidebarCollapsed: false, // ── Sidebar collapse state ──
     },
 
@@ -903,6 +904,24 @@
             </div>
 
             <div class="filter-section">
+              <div class="filter-section__label">🚫 Exclude Status</div>
+              <div class="filter-check-group">
+                <label class="filter-check-item"><input type="checkbox" class="excl-status-check" value="New Candidate"                id="ex-New_Candidate"                onchange="Views._onExcludeStatusCheckChange()"><span>New Candidate</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="excl-status-check" value="Pending Passport"             id="ex-Pending_Passport"             onchange="Views._onExcludeStatusCheckChange()"><span>Pending Passport</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="excl-status-check" value="Pending Photo"                id="ex-Pending_Photo"                onchange="Views._onExcludeStatusCheckChange()"><span>Pending Photo</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="excl-status-check" value="Pending Academic Certificate" id="ex-Pending_Academic_Certificate"  onchange="Views._onExcludeStatusCheckChange()"><span>Pending Academic Certificate</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="excl-status-check" value="Pending Medical"              id="ex-Pending_Medical"              onchange="Views._onExcludeStatusCheckChange()"><span>Pending Medical</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="excl-status-check" value="Booked a medical examination" id="ex-Booked_medical"                onchange="Views._onExcludeStatusCheckChange()"><span>Booked a medical examination</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="excl-status-check" value="Documents Under Preparing"    id="ex-Docs_Under_Preparing"          onchange="Views._onExcludeStatusCheckChange()"><span>Documents Under Preparing</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="excl-status-check" value="Documents Complete"          id="ex-Documents_Complete"           onchange="Views._onExcludeStatusCheckChange()"><span>Documents Complete</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="excl-status-check" value="Visa Pending"                id="ex-Visa_Pending"                 onchange="Views._onExcludeStatusCheckChange()"><span>Visa Pending</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="excl-status-check" value="Visa Completed"              id="ex-Visa_Completed"               onchange="Views._onExcludeStatusCheckChange()"><span>Visa Completed</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="excl-status-check" value="Mobilized"                   id="ex-Mobilized"                    onchange="Views._onExcludeStatusCheckChange()"><span>Mobilized</span></label>
+                <label class="filter-check-item"><input type="checkbox" class="excl-status-check" value="Closed"                      id="ex-Closed"                       onchange="Views._onExcludeStatusCheckChange()"><span>Closed</span></label>
+              </div>
+            </div>
+
+            <div class="filter-section">
               <div class="filter-section__label">📎 Missing Documents</div>
               <div class="filter-check-group">
                 <label class="filter-check-item"><input type="checkbox" class="doc-check" value="Passport"             id="dc-Passport"             onchange="Views._onDocCheckChange()"><span>Missing Passport</span></label>
@@ -917,7 +936,7 @@
 
             <div class="filter-section">
               <div class="filter-section__label">🏢 Department</div>
-              <select id="dept-filter" class="form-select" style="max-width:190px" onchange="Views._filterCandidates()">
+              <select id="dept-filter" class="form-select" style="max-width:190px" onchange="Views._saveFilterState();Views._filterCandidates()">
                 <option value="">All Departments</option>
                 <option>Projects</option><option>Maintenance</option><option>Finance</option>
                 <option>HR</option><option>Operations</option><option>IT</option><option>Safety</option>
@@ -978,8 +997,8 @@
             : { pct: 0, missingDocs: [...REQUIRED_DOCS], presentDocs: [] };
         });
         App.setState({ docCompleteness: completeness });
-        // Re-render table now that completeness data is available
-        Views._filterCandidates();
+        // Re-render table now that completeness data is available — restore saved filters first
+        Views._restoreFilterState();
       } catch (err) {
         console.error('Completeness batch load error:', err);
       }
@@ -998,8 +1017,11 @@
           c.FullName?.toLowerCase().includes(query) ||
           c.Email?.toLowerCase().includes(query) ||
           c.Position?.toLowerCase().includes(query);
-        // Multi-select status (empty array = all)
+        // Multi-select status INCLUDE (empty array = all)
         const matchS = statusFilters.length === 0 || statusFilters.includes(c.CurrentStatus);
+        // Multi-select status EXCLUDE (empty array = hide nothing)
+        const { excludeStatusFilters } = App.state;
+        const matchExcl = excludeStatusFilters.length === 0 || !excludeStatusFilters.includes(c.CurrentStatus);
         // Department
         const matchD = !deptFilter || c.Department === deptFilter;
         // Missing doc filter — candidate must be missing ANY of the selected doc types
@@ -1008,7 +1030,7 @@
           (comp && docFilters.some(doc => comp.missingDocs.includes(doc)));
         // Minimum completion %
         const matchCompletion = !comp || comp.pct >= completionMin;
-        return matchQ && matchS && matchD && matchDoc && matchCompletion;
+        return matchQ && matchS && matchExcl && matchD && matchDoc && matchCompletion;
       });
 
       // Sorting
@@ -1061,6 +1083,7 @@
         btn.classList.toggle('quick-filter-btn--active', filters.includes(docType));
         btn.setAttribute('aria-pressed', String(filters.includes(docType)));
       }
+      Views._saveFilterState();
       Views._updateClearButton();
       Views._filterCandidates();
     },
@@ -1079,6 +1102,7 @@
         btn.classList.toggle('quick-filter-btn--active', filters.includes(status));
         btn.setAttribute('aria-pressed', String(filters.includes(status)));
       }
+      Views._saveFilterState();
       Views._updateClearButton();
       Views._filterCandidates();
     },
@@ -1094,6 +1118,16 @@
           btn.setAttribute('aria-pressed', String(checked.includes(st)));
         }
       });
+      Views._saveFilterState();
+      Views._updateClearButton();
+      Views._filterCandidates();
+    },
+
+    // ── Advanced panel: exclude-status checkboxes changed ──
+    _onExcludeStatusCheckChange() {
+      const checked = [...document.querySelectorAll('.excl-status-check:checked')].map(el => el.value);
+      App.setState({ excludeStatusFilters: checked });
+      Views._saveFilterState();
       Views._updateClearButton();
       Views._filterCandidates();
     },
@@ -1109,6 +1143,7 @@
           btn.setAttribute('aria-pressed', String(checked.includes(doc)));
         }
       });
+      Views._saveFilterState();
       Views._updateClearButton();
       Views._filterCandidates();
     },
@@ -1116,6 +1151,81 @@
     _onCompletionRange(value) {
       const el = document.getElementById('completion-min-val');
       if (el) el.textContent = value + '%';
+      Views._saveFilterState();
+      Views._filterCandidates();
+    },
+
+    // ── Persist all filter state to localStorage ──
+    _saveFilterState() {
+      const deptEl  = document.getElementById('dept-filter');
+      const rangeEl = document.getElementById('completion-min');
+      const payload = {
+        statusFilters:        App.state.statusFilters,
+        excludeStatusFilters: App.state.excludeStatusFilters,
+        docFilters:           App.state.docFilters,
+        deptFilter:           deptEl  ? deptEl.value  : '',
+        completionMin:        rangeEl ? parseInt(rangeEl.value, 10) : 0,
+      };
+      try { localStorage.setItem('hr_candidate_filters', JSON.stringify(payload)); } catch (_) {}
+    },
+
+    // ── Restore filter state from localStorage and re-apply ──
+    _restoreFilterState() {
+      let saved;
+      try { saved = JSON.parse(localStorage.getItem('hr_candidate_filters') || 'null'); } catch (_) {}
+      if (!saved) return;
+
+      // Restore state object
+      App.setState({
+        statusFilters:        Array.isArray(saved.statusFilters)        ? saved.statusFilters        : [],
+        excludeStatusFilters: Array.isArray(saved.excludeStatusFilters) ? saved.excludeStatusFilters : [],
+        docFilters:           Array.isArray(saved.docFilters)           ? saved.docFilters           : [],
+      });
+
+      // Restore Status checkboxes + quick-filter buttons
+      document.querySelectorAll('.status-check').forEach(cb => {
+        cb.checked = App.state.statusFilters.includes(cb.value);
+      });
+      ['Visa Pending','Visa Completed','Mobilized','Documents Complete'].forEach(st => {
+        const btn = document.getElementById(`qf-status-${st.replace(/\s/g,'_')}`);
+        if (btn) {
+          const on = App.state.statusFilters.includes(st);
+          btn.classList.toggle('quick-filter-btn--active', on);
+          btn.setAttribute('aria-pressed', String(on));
+        }
+      });
+
+      // Restore Exclude Status checkboxes
+      document.querySelectorAll('.excl-status-check').forEach(cb => {
+        cb.checked = App.state.excludeStatusFilters.includes(cb.value);
+      });
+
+      // Restore Doc checkboxes + quick-filter buttons
+      document.querySelectorAll('.doc-check').forEach(cb => {
+        cb.checked = App.state.docFilters.includes(cb.value);
+      });
+      ['Passport','Photo','Academic Certificate','Medical Examination','Medical Analysis','Visa','CV'].forEach(doc => {
+        const btn = document.getElementById(`qf-doc-${doc.replace(/\s/g,'_')}`);
+        if (btn) {
+          const on = App.state.docFilters.includes(doc);
+          btn.classList.toggle('quick-filter-btn--active', on);
+          btn.setAttribute('aria-pressed', String(on));
+        }
+      });
+
+      // Restore Department dropdown
+      const deptEl = document.getElementById('dept-filter');
+      if (deptEl && saved.deptFilter) deptEl.value = saved.deptFilter;
+
+      // Restore Completion % range
+      const rangeEl  = document.getElementById('completion-min');
+      const rangeVal = document.getElementById('completion-min-val');
+      if (rangeEl && saved.completionMin != null) {
+        rangeEl.value = saved.completionMin;
+        if (rangeVal) rangeVal.textContent = saved.completionMin + '%';
+      }
+
+      Views._updateClearButton();
       Views._filterCandidates();
     },
 
@@ -1131,8 +1241,8 @@
     },
 
     _clearAllFilters() {
-      App.setState({ statusFilters: [], docFilters: [], sortCol: '', sortDir: 'asc' });
-      document.querySelectorAll('.status-check, .doc-check').forEach(cb => { cb.checked = false; });
+      App.setState({ statusFilters: [], excludeStatusFilters: [], docFilters: [], sortCol: '', sortDir: 'asc' });
+      document.querySelectorAll('.status-check, .excl-status-check, .doc-check').forEach(cb => { cb.checked = false; });
       document.querySelectorAll('.quick-filter-btn').forEach(btn => {
         btn.classList.remove('quick-filter-btn--active');
         btn.setAttribute('aria-pressed', 'false');
@@ -1145,12 +1255,15 @@
       if (rangeVal) rangeVal.textContent = '0%';
       const searchInput = document.getElementById('search-input');
       if (searchInput) searchInput.value = '';
+      try { localStorage.removeItem('hr_candidate_filters'); } catch (_) {}
       Views._updateClearButton();
       Views._filterCandidates();
     },
 
     _updateClearButton() {
-      const hasFilters = App.state.statusFilters.length > 0 || App.state.docFilters.length > 0;
+      const hasFilters = App.state.statusFilters.length > 0
+        || App.state.excludeStatusFilters.length > 0
+        || App.state.docFilters.length > 0;
       const btn = document.getElementById('clear-filters-btn');
       if (btn) btn.style.display = hasFilters ? '' : 'none';
     },
