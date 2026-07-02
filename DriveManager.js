@@ -13,12 +13,34 @@
 const ROOT_FOLDER_NAME = 'Oman Mobilization';
 
 /**
- * Helper: Gets or creates the root "Oman Mobilization" folder in Drive.
+ * Gets or creates the root Drive folder, caching its ID in PropertiesService.
+ * DriveApp.getFoldersByName() is a Drive-wide name search — noticeably
+ * slower than a direct getFolderById() lookup. Storing the ID in
+ * PropertiesService (which persists across GAS executions) means the
+ * name-search only ever runs once: the very first time the folder is
+ * accessed. Every subsequent call is a fast direct lookup.
  */
 function getRootFolder_() {
+  const props    = PropertiesService.getScriptProperties();
+  const cachedId = props.getProperty('ROOT_FOLDER_ID');
+
+  if (cachedId) {
+    try {
+      return DriveApp.getFolderById(cachedId);
+    } catch (_) {
+      // Cached ID is stale (folder was deleted/moved) — fall through to search
+      props.deleteProperty('ROOT_FOLDER_ID');
+    }
+  }
+
+  // First-time lookup: search by name, then persist the ID
   const folders = DriveApp.getFoldersByName(ROOT_FOLDER_NAME);
-  if (folders.hasNext()) return folders.next();
-  return DriveApp.createFolder(ROOT_FOLDER_NAME);
+  const folder  = folders.hasNext()
+    ? folders.next()
+    : DriveApp.createFolder(ROOT_FOLDER_NAME);
+
+  props.setProperty('ROOT_FOLDER_ID', folder.getId());
+  return folder;
 }
 
 /**
@@ -31,6 +53,8 @@ function getRootFolder_() {
  * @returns {string} The folder ID to be stored in the Candidates sheet
  */
 function api_createCandidateFolder(candidateId, fullName) {
+  const auth = requireRole_(['Admin', 'HR']);
+  if (!auth.authorized) return { success: false, error: auth.error };
   try {
     const root = getRootFolder_();
     const folderName = candidateId + ' - ' + fullName;
@@ -72,9 +96,30 @@ function api_createCandidateFolder(candidateId, fullName) {
  * @param {string} mimeType     - 'application/pdf', 'image/jpeg', or 'image/png'
  */
 function api_uploadFileToDrive(candidateId, folderId, docType, fileName, base64Data, mimeType) {
+  const auth = requireRole_(['Admin', 'HR', 'Coordinator']);
+  if (!auth.authorized) return { success: false, error: auth.error };
+  // ── Server-side validation (never trust the client) ──────────────────
+  const ALLOWED_MIME_TYPES = new Set([
+    'application/pdf',
+    'image/jpeg',
+    'image/png'
+  ]);
+  const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
+
+  if (!ALLOWED_MIME_TYPES.has(mimeType)) {
+    return { success: false, error: 'File type not allowed: ' + mimeType + '. Only PDF, JPG, PNG are accepted.' };
+  }
+
+  // Estimate original size from base64 length (base64 inflates by ~4/3)
+  const estimatedBytes = Math.floor(base64Data.length * 0.75);
+  if (estimatedBytes > MAX_FILE_BYTES) {
+    return { success: false, error: 'File exceeds the 10 MB size limit.' };
+  }
+  // ─────────────────────────────────────────────────────────────────────
+
   try {
     const folder = DriveApp.getFolderById(folderId);
-    
+
     // Decode and build the file blob
     const decoded = Utilities.base64Decode(base64Data);
     const blob = Utilities.newBlob(decoded, mimeType, docType + '_' + fileName);
@@ -94,6 +139,8 @@ function api_uploadFileToDrive(candidateId, folderId, docType, fileName, base64D
     const docId = api_writeDocumentRecord_(candidateId, docType, fileName, fileUrl, mimeType);
     
     api_writeLog_(candidateId, Session.getActiveUser().getEmail(), 'Document Uploaded: ' + docType);
+    // [CACHE POLICY] Write operation — invalidate dashboard cache immediately
+    CacheService.getScriptCache().remove('dashboard_data');
     return { success: true, fileUrl: fileUrl, documentId: docId };
   } catch(e) {
     Logger.log(e);

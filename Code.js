@@ -52,8 +52,42 @@ function include(filename) {
  *   missingMedicalExam, missingMedicalAnalysis, missingVisa, missingCV
  *   → count of candidates who are MISSING that doc
  */
+
+// ═══════════════════════════════════════════════════════════════════════
+// DASHBOARD CACHE — INVALIDATION POLICY (project architecture rule)
+// ═══════════════════════════════════════════════════════════════════════
+// Cache key : 'dashboard_data'
+// TTL       : 60 seconds (FALLBACK ONLY — not the primary mechanism)
+// Strategy  : EVENT-BASED invalidation
+//
+// Any backend function that inserts, updates, deletes, approves, rejects,
+// archives, restores, or otherwise modifies data displayed on the Dashboard
+// MUST add this line immediately before its success return:
+//
+//   CacheService.getScriptCache().remove('dashboard_data');
+//
+// Read-only api_get* functions MUST NOT call remove().
+//
+// Cache lifecycle:
+//   Request → cache HIT  → return cached JSON (0 Sheets calls)
+//   Request → cache MISS → read Sheets → compute → cache.put() → return
+//   Write op fires       → cache.remove() → next request regenerates
+// ═══════════════════════════════════════════════════════════════════════
+
 function api_getDashboardData() {
   try {
+    // ── Cache read ─────────────────────────────────────────────────────
+    // CacheService stores the computed result for 60 seconds (TTL = fallback).
+    // Primary invalidation is EVENT-BASED: every write api_* function calls
+    // CacheService.getScriptCache().remove('dashboard_data') before returning.
+    // This means the cache is always fresh immediately after any data change.
+    const _cache      = CacheService.getScriptCache();
+    const _cachedJson = _cache.get('dashboard_data');
+    if (_cachedJson) {
+      return JSON.parse(_cachedJson);
+    }
+    // ───────────────────────────────────────────────────────────────────
+
     const candsRes = api_getAllCandidates();
     if (!candsRes.success) throw new Error(candsRes.error);
     const docsRes  = api_getAllDocuments();
@@ -118,7 +152,7 @@ function api_getDashboardData() {
         else                missingCount[dt]++;
       });
     });
-    return {
+    const _result = {
       success: true,
       data: {
         // Status-based
@@ -149,6 +183,15 @@ function api_getDashboardData() {
         msg: 'Live data successfully retrieved from Google Sheets.'
       }
     };
+
+    // ── Cache write ───────────────────────────────────────────────────
+    // TTL = 60 seconds (fallback only). The cache is primarily invalidated
+    // by event-based removal in every write api_* function — not by TTL.
+    // If JSON.stringify exceeds 100KB, put() fails silently (try/catch).
+    try { _cache.put('dashboard_data', JSON.stringify(_result), 60); } catch (_) {}
+    // ───────────────────────────────────────────────────────────────────
+
+    return _result;
   } catch (e) {
     Logger.log(e);
     return { success: false, error: e.message };

@@ -73,9 +73,9 @@ function runProductionTest() {
     candidateId,
     folderResult.folderId,
     'TestDocument',
-    'integration_test.txt',
+    'integration_test.pdf',  // renamed to .pdf to match allowed MIME type
     sampleBase64,
-    'text/plain'
+    'application/pdf'         // 'text/plain' is blocked by server-side validation (Prompt 1)
   );
 
   if (!uploadResult.success) {
@@ -154,22 +154,105 @@ function runProductionTest() {
  * Run this after runProductionTest() to keep your Sheet clean.
  * Pass the candidateId logged in the previous run.
  */
+/**
+ * Full cleanup after runProductionTest().
+ * Deletes: Candidate row, all Document rows, all Log rows, and the Drive folder.
+ * Pass the candidateId printed in the SUMMARY section of the test log.
+ *
+ * Example: cleanupProductionTest("mock-uuid-abc123")
+ */
 function cleanupProductionTest(candidateId) {
   if (!candidateId) {
     Logger.log('⚠️  Provide a candidateId to clean up. Example: cleanupProductionTest("mock-uuid-abc123")');
     return;
   }
 
-  const sheet = getSheet_(SHEET_CANDIDATES);
-  const data  = sheet.getDataRange().getValues();
-  const idCol = data[0].indexOf('CandidateID');
+  Logger.log('🧹 Starting cleanup for candidateId: ' + candidateId);
+  let errors = [];
 
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][idCol] === candidateId) {
-      sheet.deleteRow(i + 1);
-      Logger.log('✅ Test candidate row deleted: ' + candidateId);
-      return;
+  // ── 1. Delete Drive folder ────────────────────────────────────────────────
+  try {
+    const candSheet  = getSheet_(SHEET_CANDIDATES);
+    const candData   = candSheet.getDataRange().getValues();
+    const candIdCol  = candData[0].indexOf('CandidateID');
+    const folderCol  = candData[0].indexOf('DriveFolderID');
+
+    const candRow = candData.find((row, i) => i > 0 && row[candIdCol] === candidateId);
+    if (candRow && candRow[folderCol]) {
+      const folderId = candRow[folderCol];
+      try {
+        DriveApp.getFolderById(folderId).setTrashed(true);
+        Logger.log('✅ Drive folder trashed: ' + folderId);
+      } catch (e) {
+        errors.push('Drive folder: ' + e.message);
+        Logger.log('⚠️  Could not trash Drive folder: ' + e.message);
+      }
+    } else {
+      Logger.log('ℹ️  No Drive folder found for this candidate (already deleted or never created).');
     }
+  } catch (e) {
+    errors.push('Drive lookup: ' + e.message);
   }
-  Logger.log('⚠️  Candidate not found: ' + candidateId);
+
+  // ── 2. Delete Candidate row ───────────────────────────────────────────────
+  try {
+    const sheet = getSheet_(SHEET_CANDIDATES);
+    const data  = sheet.getDataRange().getValues();
+    const idCol = data[0].indexOf('CandidateID');
+    let deleted = false;
+    for (let i = data.length - 1; i >= 1; i--) {
+      if (data[i][idCol] === candidateId) {
+        sheet.deleteRow(i + 1);
+        Logger.log('✅ Candidate row deleted.');
+        deleted = true;
+        break;
+      }
+    }
+    if (!deleted) Logger.log('ℹ️  Candidate row not found (already deleted?).');
+  } catch (e) {
+    errors.push('Candidate delete: ' + e.message);
+  }
+
+  // ── 3. Delete all Document rows for this candidate ────────────────────────
+  try {
+    const sheet = getSheet_(SHEET_DOCUMENTS);
+    const data  = sheet.getDataRange().getValues();
+    const idCol = data[0].indexOf('CandidateID');
+    let count   = 0;
+    // Iterate bottom-up to avoid row-index drift after deletion
+    for (let i = data.length - 1; i >= 1; i--) {
+      if (data[i][idCol] === candidateId) {
+        sheet.deleteRow(i + 1);
+        count++;
+      }
+    }
+    Logger.log('✅ Deleted ' + count + ' document record(s).');
+  } catch (e) {
+    errors.push('Documents delete: ' + e.message);
+  }
+
+  // ── 4. Delete all Audit Log rows for this candidate ───────────────────────
+  try {
+    const sheet = getSheet_(SHEET_LOGS);
+    const data  = sheet.getDataRange().getValues();
+    const idCol = data[0].indexOf('CandidateID');
+    let count   = 0;
+    for (let i = data.length - 1; i >= 1; i--) {
+      if (data[i][idCol] === candidateId) {
+        sheet.deleteRow(i + 1);
+        count++;
+      }
+    }
+    Logger.log('✅ Deleted ' + count + ' audit log entry/entries.');
+  } catch (e) {
+    errors.push('Log delete: ' + e.message);
+  }
+
+  // ── Summary ───────────────────────────────────────────────────────────────
+  if (errors.length === 0) {
+    Logger.log('\n✅ Cleanup complete — all test data removed.');
+  } else {
+    Logger.log('\n⚠️  Cleanup finished with ' + errors.length + ' error(s):');
+    errors.forEach(err => Logger.log('   • ' + err));
+  }
 }

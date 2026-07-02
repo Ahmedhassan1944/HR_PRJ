@@ -603,7 +603,7 @@
   .quick-filters {
     display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap;
     padding: var(--sp-2) var(--sp-4);
-    background: #faf9f8; border-bottom: 1px solid var(--border);
+    background: transparent; border-bottom: 1px solid var(--border);
   }
 
   .quick-filters__label {
@@ -618,7 +618,7 @@
     display: inline-flex; align-items: center; gap: 4px;
     padding: 4px 12px; border-radius: 20px;
     font-size: .75rem; font-weight: 600; white-space: nowrap;
-    background: var(--bg-surface); border: 1px solid var(--border);
+    background: transparent; border: 1px solid var(--border);
     color: var(--text-secondary); cursor: pointer;
     transition: all var(--ease);
   }
@@ -1040,8 +1040,8 @@
   transition: background .12s;
 }
 .dash-export-item:hover {
-  background: var(--primary-light);
-  color: var(--primary-dark);
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 .dash-export-item + .dash-export-item {
   border-top: 1px solid var(--border);

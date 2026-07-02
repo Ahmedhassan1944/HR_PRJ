@@ -689,7 +689,7 @@
         ' onclick="Views._toggleExportMenu()" aria-haspopup="true" aria-expanded="false">' +
         '📥 Export ▾</button>' +
         '<div id="dash-export-menu" style="display:none;position:absolute;top:calc(100% + 4px);right:0;' +
-        'background:#fff;border:1px solid var(--border);border-radius:var(--radius);' +
+        'background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius);' +
         'box-shadow:var(--shadow-card);min-width:210px;z-index:300">' +
         '<button class="dash-export-item" onclick="Views._exportDashboardCandidates()">👥 All Candidates (CSV)</button>' +
         '<button class="dash-export-item" onclick="Views._exportDashboardKPI()">📊 KPI Summary (CSV)</button>' +
@@ -1212,7 +1212,8 @@
               <div style="width:34px;height:34px;border-radius:50%;background:var(--primary-light);color:var(--primary);display:grid;place-items:center;font-weight:700;font-size:.78rem;flex-shrink:0">${fmt.initials(c.FullName)}</div>
               <div>
                 <div class="td-primary">${escHtml(c.FullName)}</div>
-                <div class="td-secondary">${escHtml(c.Email)}</div>
+                <div class="td-secondary">${escHtml(c.Phone || '—')}</div>
+                ${c.Notes ? `<div class="td-secondary" style="font-style:italic;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(c.Notes)}">${escHtml(c.Notes)}</div>` : ''}
               </div>
             </div>
           </td>
