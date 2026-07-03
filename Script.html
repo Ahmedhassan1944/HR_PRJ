@@ -2158,7 +2158,7 @@
           document.getElementById('cal-kpi-active').textContent = res.data.length;
           
           const initialFilter = App.state.filter || 'All';
-          const btn = document.querySelector(\`button[data-cal-filter="\${initialFilter}"]\`);
+          const btn = document.querySelector(`button[data-cal-filter="${initialFilter}"]`);
           Views._applyCalendarFilter(initialFilter, btn);
         } else {
           throw new Error(res.error);
@@ -2224,7 +2224,7 @@
       if (!el) return;
       
       if (events.length === 0) {
-        el.innerHTML = \`<div class="table-empty"><div class="table-empty__icon">📅</div>\${noDataMsg}</div>\`;
+        el.innerHTML = `<div class="table-empty"><div class="table-empty__icon">📅</div>${noDataMsg}</div>`;
         return;
       }
 
@@ -2233,32 +2233,32 @@
         const dateStr = d.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' });
         const isPast = d < new Date(new Date().setHours(0,0,0,0));
         
-        return \`
+        return `
         <div class="event-card">
           <div class="event-card__header">
             <div>
-              <div class="event-card__title">\${escHtml(e.Title)} \${isPast && e.Status === 'Active' ? '<span style="color:var(--danger);font-size:.75rem">⚠️ Overdue</span>' : ''}</div>
-              <div class="event-card__subtitle">Candidate: <strong>\${escHtml(e.CandidateName)}</strong></div>
+              <div class="event-card__title">${escHtml(e.Title)} ${isPast && e.Status === 'Active' ? '<span style="color:var(--danger);font-size:.75rem">⚠️ Overdue</span>' : ''}</div>
+              <div class="event-card__subtitle">Candidate: <strong>${escHtml(e.CandidateName)}</strong></div>
             </div>
-            <div class="priority-badge priority-badge--\${(e.Priority||'medium').toLowerCase()}">\${escHtml(e.Priority)}</div>
+            <div class="priority-badge priority-badge--${(e.Priority||'medium').toLowerCase()}">${escHtml(e.Priority)}</div>
           </div>
           
           <div class="event-card__meta">
             <div class="event-card__meta-item">
-              <span>📅</span> \${dateStr} \${e.EventTime ? 'at ' + e.EventTime : '(All Day)'}
+              <span>📅</span> ${dateStr} ${e.EventTime ? 'at ' + e.EventTime : '(All Day)'}
             </div>
-            \${e.GoogleCalendarLink ? \`
+            ${e.GoogleCalendarLink ? `
             <div class="event-card__meta-item">
-              <span>🔗</span> <a href="\${e.GoogleCalendarLink}" target="_blank" rel="noopener">Open in GCal ↗</a>
-            </div>\` : ''}
+              <span>🔗</span> <a href="${e.GoogleCalendarLink}" target="_blank" rel="noopener">Open in GCal ↗</a>
+            </div>` : ''}
           </div>
           
-          \${e.Description ? \`<div style="font-size:.8rem;margin-top:4px;white-space:pre-wrap;color:var(--text-secondary)">\${escHtml(e.Description)}</div>\` : ''}
+          ${e.Description ? `<div style="font-size:.8rem;margin-top:4px;white-space:pre-wrap;color:var(--text-secondary)">${escHtml(e.Description)}</div>` : ''}
           
           <div class="event-card__actions">
-            \${e.Status === 'Active' ? \`<button class="btn btn--outline btn--sm" onclick="Views._markEventComplete('\${e.EventID}')">✔️ Mark Completed</button>\` : \`<span class="event-status event-status--\${e.Status.toLowerCase()}">\${e.Status}</span>\`}
+            ${e.Status === 'Active' ? `<button class="btn btn--outline btn--sm" onclick="Views._markEventComplete('${e.EventID}')">✔️ Mark Completed</button>` : `<span class="event-status event-status--${e.Status.toLowerCase()}">${e.Status}</span>`}
           </div>
-        </div>\`;
+        </div>`;
       }).join('');
     },
 
@@ -2276,13 +2276,13 @@
     },
 
     _openEventModal(candidateId) {
-      Modal.open(\`
+      Modal.open(`
         <div class="modal__header">
           <div class="modal__title">📅 Schedule Follow-up Event</div>
           <button class="modal__close" onclick="Modal.close()" aria-label="Close">✕</button>
         </div>
         <div class="modal__body">
-          <form id="eventForm" class="form-grid" onsubmit="Views._submitEvent(event, '\${candidateId}')">
+          <form id="eventForm" class="form-grid" onsubmit="Views._submitEvent(event, '${candidateId}')">
             
             <div class="form-group col-span-2">
               <label class="form-label">Event Title <span class="required">*</span></label>
@@ -2323,7 +2323,7 @@
           <button class="btn btn--ghost" onclick="Modal.close()">Cancel</button>
           <button class="btn btn--primary" type="submit" form="eventForm" id="btnSubmitEvent">Schedule Event</button>
         </div>
-      \`);
+      `);
       
       // Default to tomorrow
       const tomorrow = new Date();

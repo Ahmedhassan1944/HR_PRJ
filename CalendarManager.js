@@ -245,11 +245,25 @@ function api_updateCalendarEvent(eventId, updates) {
           calEvent.setAllDayDate(startDate);
         }
 
-        if (updates.description) {
-           // We just append to whatever they had before or overwrite, for simplicity overwrite with same pattern
+        if (updates.description !== undefined) {
            const candName = rowData[headers.indexOf('CandidateName')];
-           // Actually we don't have current status readily available without another lookup, just set description if provided.
-           calEvent.setDescription(updates.description);
+           const candId = rowData[headers.indexOf('CandidateID')];
+           let candStatus = 'Unknown';
+           
+           const candSheet = getSheet_(SHEET_CANDIDATES);
+           const candData = candSheet.getDataRange().getValues();
+           const candHeaders = candData[0];
+           const candIdCol = candHeaders.indexOf('CandidateID');
+           
+           for (let i = 1; i < candData.length; i++) {
+             if (candData[i][candIdCol] === candId) {
+               candStatus = candData[i][candHeaders.indexOf('CurrentStatus')];
+               break;
+             }
+           }
+           
+           const descriptionText = `Candidate: ${candName}\nStatus: ${candStatus}\n\n${updates.description || ''}`;
+           calEvent.setDescription(descriptionText);
         }
 
         // Reminders update
