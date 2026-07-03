@@ -190,6 +190,12 @@
       if (fnName === 'api_uploadFileToDrive') return { success: true, fileUrl: '#', documentId: 'mock-doc-id' };
       if (fnName === 'api_sendRejectionEmail') return { success: true };
       if (fnName === 'api_sendWelcomeEmail') return { success: true };
+      if (fnName === 'api_getAllUpcomingEvents') return { success: true, data: [] };
+      if (fnName === 'api_getEventsByCandidate') return { success: true, data: [] };
+      if (fnName === 'api_createCalendarEvent') return { success: true, eventId: 'ev-' + Date.now(), calendarEventId: 'cal-' + Date.now(), calendarLink: '#' };
+      if (fnName === 'api_updateCalendarEvent') return { success: true };
+      if (fnName === 'api_deleteCalendarEvent') return { success: true };
+      if (fnName === 'api_markEventCompleted') return { success: true };
       return { success: true };
     }
   };
@@ -361,6 +367,7 @@
   const sidebar_items = [
     { view: 'dashboard', icon: '📊', label: 'Dashboard' },
     { view: 'candidates', icon: '👥', label: 'Candidates', badge: () => App.state.candidates.filter(c => c.CurrentStatus === 'Documents Requested').length || '' },
+    { view: 'calendar', icon: '📅', label: 'Calendar', badge: () => (App.state.calendarEvents || []).filter(e => e.Status === 'Active').length || '' },
     { view: 'audit', icon: '📋', label: 'Audit Log' },
   ];
 
@@ -405,6 +412,7 @@
     else if (currentView === 'candidates') Views.candidates(view);
     else if (currentView === 'candidate-detail') Views.candidateDetail(view);
     else if (currentView === 'new-candidate') Views.newCandidate(view);
+    else if (currentView === 'calendar') Views.calendar(view);
     else if (currentView === 'audit') Views.auditLog(view);
     else view.innerHTML = '<div class="loading-overlay">404 — View not found.</div>';
   };
@@ -447,6 +455,11 @@
       <div class="kpi-section-label" style="margin-top:var(--sp-5)">❌ Candidates MISSING Document</div>
       <div class="kpi-grid" id="kpi-grid-missing">
         ${[1,2,3,4,5,6,7].map(() => `<div class="kpi-card"><div class="skeleton" style="height:80px"></div></div>`).join('')}
+      </div>
+
+      <div class="kpi-section-label" style="margin-top:var(--sp-5)">📅 Follow-up Calendar</div>
+      <div class="kpi-grid" id="kpi-grid-calendar">
+        ${[1,2,3,4,5].map(() => `<div class="kpi-card"><div class="skeleton" style="height:80px"></div></div>`).join('')}
       </div>
 
       <!-- HINT BAR -->
@@ -522,6 +535,15 @@
             Views._kpiCard('Missing Visa',             k.missingVisa            ?? '--', '🌍',  'red',    'No visa document',              { type:'missingDoc', value:'Visa' }),
             Views._kpiCard('Missing CV',               k.missingCV              ?? '--', '📄',  'red',    'No CV',                         { type:'missingDoc', value:'CV' }),
           ].join('');
+          
+          // ── Section 4: Calendar cards ──────────────────────────────
+          document.getElementById('kpi-grid-calendar').innerHTML = [
+            Views._kpiCard('Upcoming Today',       k.eventsToday        ?? '--', '📅',  'blue',   'Events scheduled for today',      { type:'calendar', value:'Today' }),
+            Views._kpiCard('Upcoming Tomorrow',    k.eventsTomorrow     ?? '--', '📅',  'blue',   'Events scheduled for tomorrow',   { type:'calendar', value:'Tomorrow' }),
+            Views._kpiCard('This Week',            k.eventsThisWeek     ?? '--', '📅',  'purple', 'Events in the next 7 days',       { type:'calendar', value:'ThisWeek' }),
+            Views._kpiCard('Overdue',              k.eventsOverdue      ?? '--', '⚠️', 'red',    'Events past their date',          { type:'calendar', value:'Overdue' }),
+            Views._kpiCard('High Priority',        k.eventsHighPriority ?? '--', '🔥', 'orange', 'Important upcoming events',       { type:'calendar', value:'HighPriority' }),
+          ].join('');
         }
 
         if (candsRes.success) {
@@ -554,6 +576,11 @@
       const type  = cardEl.dataset.filterType;
       const value = cardEl.dataset.filterValue;
       const key   = `${type}::${value}`;
+
+      if (type === 'calendar') {
+        Router.navigate('calendar', { filter: value });
+        return;
+      }
 
       if (event.ctrlKey || event.metaKey) {
         // CTRL+Click → toggle this card in the multi-select set
@@ -1459,6 +1486,9 @@
           <button class="btn btn--outline btn--sm" onclick="Views._openStatusModal('${escHtml(c.CandidateID)}','${escHtml(c.FullName)}')">
             🔄 Update Status
           </button>
+          <button class="btn btn--outline btn--sm" onclick="Views._openEventModal('${escHtml(c.CandidateID)}')">
+            📅 Add Event
+          </button>
           <button class="btn btn--primary" onclick="Views._openUploadModal('${escHtml(c.CandidateID)}','${escHtml(c.DriveFolderID || '')}')">
             📤 Upload Document
           </button>
@@ -1493,6 +1523,16 @@
         </div>
       </div>
 
+      <!-- Events Section -->
+      <div class="table-card" style="margin-bottom:var(--sp-4)">
+        <div class="table-toolbar">
+          <span class="table-toolbar__title">📅 Follow-up Events</span>
+        </div>
+        <div id="events-section" style="padding:var(--sp-3)">
+          <div class="loading-overlay"><div class="spinner spinner--dark"></div>Loading events…</div>
+        </div>
+      </div>
+
       <!-- Audit Log Section -->
       <div class="table-card">
         <div class="table-toolbar">
@@ -1504,6 +1544,7 @@
       </div>`;
 
       Views._loadCandidateDocuments(c.CandidateID);
+      Views._loadCandidateEvents(c.CandidateID);
       Views._loadCandidateAudit(c.CandidateID);
     },
 
@@ -2067,6 +2108,278 @@
             <td>${escHtml(l.Event)}</td>
           </tr>`).join('')
         : `<tr><td colspan="4"><div class="table-empty"><div class="table-empty__icon">📋</div>No log entries found.</div></td></tr>`;
+    },
+
+    // ── CALENDAR VIEW ──────────────────────────────
+    async calendar(container) {
+      container.innerHTML = `
+      <div class="page-header">
+        <div>
+          <h1 class="page-header__title">Follow-up Calendar</h1>
+          <p class="page-header__sub">Manage candidate appointments and deadlines</p>
+        </div>
+        <div class="page-header__actions">
+          <button class="btn btn--outline btn--sm" onclick="Router.navigate('calendar')" aria-label="Refresh events">
+            🔄 Refresh
+          </button>
+        </div>
+      </div>
+      
+      <div class="calendar-filters">
+        <span class="quick-filters__label">Filters:</span>
+        <button class="quick-filter-btn" data-cal-filter="All" onclick="Views._applyCalendarFilter('All', this)">All</button>
+        <button class="quick-filter-btn" data-cal-filter="Today" onclick="Views._applyCalendarFilter('Today', this)">Today</button>
+        <button class="quick-filter-btn" data-cal-filter="Tomorrow" onclick="Views._applyCalendarFilter('Tomorrow', this)">Tomorrow</button>
+        <button class="quick-filter-btn" data-cal-filter="ThisWeek" onclick="Views._applyCalendarFilter('ThisWeek', this)">This Week</button>
+        <button class="quick-filter-btn" data-cal-filter="Overdue" onclick="Views._applyCalendarFilter('Overdue', this)">Overdue</button>
+        <button class="quick-filter-btn" data-cal-filter="HighPriority" onclick="Views._applyCalendarFilter('HighPriority', this)">High Priority</button>
+      </div>
+
+      <div class="calendar-grid">
+        <div class="calendar-list" id="calendar-event-list">
+          <div class="loading-overlay"><div class="spinner spinner--dark"></div>Loading upcoming events…</div>
+        </div>
+        <div class="calendar-sidebar">
+           <div class="kpi-card kpi-card--blue">
+             <div class="kpi-card__label">Active Events</div>
+             <div class="kpi-card__value" id="cal-kpi-active">--</div>
+             <div class="kpi-card__icon" aria-hidden="true">📅</div>
+           </div>
+        </div>
+      </div>`;
+
+      try {
+        const res = await GAS.call('api_getAllUpcomingEvents');
+        if (res.success) {
+          App.setState({ calendarEvents: res.data });
+          Views._upcomingCount = res.data.length;
+          renderSidebar(); // update badge
+          
+          document.getElementById('cal-kpi-active').textContent = res.data.length;
+          
+          const initialFilter = App.state.filter || 'All';
+          const btn = document.querySelector(\`button[data-cal-filter="\${initialFilter}"]\`);
+          Views._applyCalendarFilter(initialFilter, btn);
+        } else {
+          throw new Error(res.error);
+        }
+      } catch (err) {
+        Toast.error('Failed to load events.');
+      }
+    },
+
+    _applyCalendarFilter(filterName, btnEl) {
+      if (btnEl) {
+        document.querySelectorAll('.quick-filter-btn').forEach(b => b.classList.remove('quick-filter-btn--active'));
+        btnEl.classList.add('quick-filter-btn--active');
+      } else {
+        document.querySelectorAll('.quick-filter-btn').forEach(b => {
+          if (b.dataset.calFilter === filterName) b.classList.add('quick-filter-btn--active');
+          else b.classList.remove('quick-filter-btn--active');
+        });
+      }
+
+      const all = App.state.calendarEvents || [];
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const nextWeek = new Date(today);
+      nextWeek.setDate(nextWeek.getDate() + 7);
+
+      let filtered = all;
+      
+      if (filterName === 'Today') {
+        filtered = all.filter(e => {
+          const d = new Date(e.EventDate);
+          return d.getTime() === today.getTime();
+        });
+      } else if (filterName === 'Tomorrow') {
+         filtered = all.filter(e => {
+          const d = new Date(e.EventDate);
+          return d.getTime() === tomorrow.getTime();
+        });
+      } else if (filterName === 'ThisWeek') {
+         filtered = all.filter(e => {
+          const d = new Date(e.EventDate);
+          return d >= today && d <= nextWeek;
+        });
+      } else if (filterName === 'Overdue') {
+         filtered = all.filter(e => {
+          const d = new Date(e.EventDate);
+          return d < today;
+        });
+      } else if (filterName === 'HighPriority') {
+         filtered = all.filter(e => e.Priority === 'High');
+      }
+      
+      // Sort chronologically
+      filtered.sort((a,b) => new Date(a.EventDate) - new Date(b.EventDate));
+
+      Views._renderEventList(filtered, 'calendar-event-list');
+    },
+
+    _renderEventList(events, containerId, noDataMsg = 'No upcoming events found.') {
+      const el = document.getElementById(containerId);
+      if (!el) return;
+      
+      if (events.length === 0) {
+        el.innerHTML = \`<div class="table-empty"><div class="table-empty__icon">📅</div>\${noDataMsg}</div>\`;
+        return;
+      }
+
+      el.innerHTML = events.map(e => {
+        const d = new Date(e.EventDate);
+        const dateStr = d.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' });
+        const isPast = d < new Date(new Date().setHours(0,0,0,0));
+        
+        return \`
+        <div class="event-card">
+          <div class="event-card__header">
+            <div>
+              <div class="event-card__title">\${escHtml(e.Title)} \${isPast && e.Status === 'Active' ? '<span style="color:var(--danger);font-size:.75rem">⚠️ Overdue</span>' : ''}</div>
+              <div class="event-card__subtitle">Candidate: <strong>\${escHtml(e.CandidateName)}</strong></div>
+            </div>
+            <div class="priority-badge priority-badge--\${(e.Priority||'medium').toLowerCase()}">\${escHtml(e.Priority)}</div>
+          </div>
+          
+          <div class="event-card__meta">
+            <div class="event-card__meta-item">
+              <span>📅</span> \${dateStr} \${e.EventTime ? 'at ' + e.EventTime : '(All Day)'}
+            </div>
+            \${e.GoogleCalendarLink ? \`
+            <div class="event-card__meta-item">
+              <span>🔗</span> <a href="\${e.GoogleCalendarLink}" target="_blank" rel="noopener">Open in GCal ↗</a>
+            </div>\` : ''}
+          </div>
+          
+          \${e.Description ? \`<div style="font-size:.8rem;margin-top:4px;white-space:pre-wrap;color:var(--text-secondary)">\${escHtml(e.Description)}</div>\` : ''}
+          
+          <div class="event-card__actions">
+            \${e.Status === 'Active' ? \`<button class="btn btn--outline btn--sm" onclick="Views._markEventComplete('\${e.EventID}')">✔️ Mark Completed</button>\` : \`<span class="event-status event-status--\${e.Status.toLowerCase()}">\${e.Status}</span>\`}
+          </div>
+        </div>\`;
+      }).join('');
+    },
+
+    async _loadCandidateEvents(candidateId) {
+      try {
+        const res = await GAS.call('api_getEventsByCandidate', candidateId);
+        if (res.success) {
+          Views._renderEventList(res.data, 'events-section', 'No events scheduled for this candidate.');
+        } else {
+          document.getElementById('events-section').innerHTML = '<div class="form-error">Failed to load events.</div>';
+        }
+      } catch (err) {
+        document.getElementById('events-section').innerHTML = '<div class="form-error">Error loading events.</div>';
+      }
+    },
+
+    _openEventModal(candidateId) {
+      Modal.open(\`
+        <div class="modal__header">
+          <div class="modal__title">📅 Schedule Follow-up Event</div>
+          <button class="modal__close" onclick="Modal.close()" aria-label="Close">✕</button>
+        </div>
+        <div class="modal__body">
+          <form id="eventForm" class="form-grid" onsubmit="Views._submitEvent(event, '\${candidateId}')">
+            
+            <div class="form-group col-span-2">
+              <label class="form-label">Event Title <span class="required">*</span></label>
+              <input type="text" id="evTitle" class="form-input" required placeholder="e.g. Passport Collection">
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">Date <span class="required">*</span></label>
+              <input type="date" id="evDate" class="form-input" required>
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">Time <span style="font-weight:normal;color:var(--text-muted)">(Optional - leave blank for all day)</span></label>
+              <input type="time" id="evTime" class="form-input">
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">Priority</label>
+              <select id="evPriority" class="form-select">
+                <option value="Low">Low</option>
+                <option value="Medium" selected>Medium</option>
+                <option value="High">High</option>
+              </select>
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">Reminder <span style="font-weight:normal;color:var(--text-muted)">(Minutes before)</span></label>
+              <input type="number" id="evReminder" class="form-input" value="30" min="0">
+            </div>
+
+            <div class="form-group col-span-2">
+              <label class="form-label">Description / Notes</label>
+              <textarea id="evDescription" class="form-textarea" rows="3" placeholder="Additional details to include in the calendar invite..."></textarea>
+            </div>
+          </form>
+        </div>
+        <div class="modal__footer">
+          <button class="btn btn--ghost" onclick="Modal.close()">Cancel</button>
+          <button class="btn btn--primary" type="submit" form="eventForm" id="btnSubmitEvent">Schedule Event</button>
+        </div>
+      \`);
+      
+      // Default to tomorrow
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      document.getElementById('evDate').value = tomorrow.toISOString().split('T')[0];
+    },
+
+    async _submitEvent(e, candidateId) {
+      e.preventDefault();
+      const btn = document.getElementById('btnSubmitEvent');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Scheduling...';
+      
+      const payload = {
+        title: document.getElementById('evTitle').value,
+        eventDate: document.getElementById('evDate').value,
+        eventTime: document.getElementById('evTime').value,
+        priority: document.getElementById('evPriority').value,
+        reminderMinutesBefore: document.getElementById('evReminder').value,
+        description: document.getElementById('evDescription').value
+      };
+      
+      try {
+        const res = await GAS.call('api_createCalendarEvent', candidateId, payload);
+        if (res.success) {
+          Toast.success('Calendar event scheduled.');
+          Modal.close();
+          Views._loadCandidateEvents(candidateId);
+        } else {
+          Toast.error(res.error || 'Failed to schedule event.');
+          btn.disabled = false;
+          btn.innerHTML = 'Schedule Event';
+        }
+      } catch (err) {
+        Toast.error('An unexpected error occurred.');
+        btn.disabled = false;
+        btn.innerHTML = 'Schedule Event';
+      }
+    },
+
+    async _markEventComplete(eventId) {
+      if (!confirm('Mark this event as completed?')) return;
+      try {
+        const res = await GAS.call('api_markEventCompleted', eventId);
+        if (res.success) {
+          Toast.success('Event marked as completed.');
+          // Refresh current view (could be candidate detail or calendar view)
+          const cv = App.state.currentView;
+          if (cv === 'calendar') Router.navigate('calendar');
+          else if (cv === 'candidate-detail') Views._loadCandidateEvents(App.state.selectedCandidate.CandidateID);
+        } else {
+          Toast.error(res.error || 'Failed to update event.');
+        }
+      } catch (err) {
+        Toast.error('An unexpected error occurred.');
+      }
     }
   };
 

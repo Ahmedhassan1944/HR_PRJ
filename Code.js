@@ -92,8 +92,11 @@ function api_getDashboardData() {
     if (!candsRes.success) throw new Error(candsRes.error);
     const docsRes  = api_getAllDocuments();
     if (!docsRes.success) throw new Error(docsRes.error);
+    const eventsRes = api_getAllUpcomingEvents();
+    if (!eventsRes.success) throw new Error(eventsRes.error);
     const candidates = candsRes.data;
     const allDocs    = docsRes.data;
+    const activeEvents = eventsRes.data;
     // ── Status-based counters ──────────────────────────────────────
     const MISSING_DOC_STATUSES = new Set([
       'New Candidate',
@@ -152,6 +155,33 @@ function api_getDashboardData() {
         else                missingCount[dt]++;
       });
     });
+    
+    // ── Calendar-based counters ────────────────────────────────────
+    const todayDate = new Date();
+    todayDate.setHours(0,0,0,0);
+    const tomorrowDate = new Date(todayDate);
+    tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+    const nextWeekDate = new Date(todayDate);
+    nextWeekDate.setDate(nextWeekDate.getDate() + 7);
+
+    let eventsToday = 0;
+    let eventsTomorrow = 0;
+    let eventsThisWeek = 0;
+    let eventsOverdue = 0;
+    let eventsHighPriority = 0;
+
+    activeEvents.forEach(evt => {
+      if (!evt.EventDate) return;
+      const [y, m, d] = evt.EventDate.split('-').map(Number);
+      const evDate = new Date(y, m - 1, d);
+      
+      if (evDate.getTime() === todayDate.getTime()) eventsToday++;
+      if (evDate.getTime() === tomorrowDate.getTime()) eventsTomorrow++;
+      if (evDate >= todayDate && evDate <= nextWeekDate) eventsThisWeek++;
+      if (evDate < todayDate) eventsOverdue++;
+      if (evt.Priority === 'High' && evDate >= todayDate) eventsHighPriority++;
+    });
+
     const _result = {
       success: true,
       data: {
@@ -180,6 +210,12 @@ function api_getDashboardData() {
         missingMedicalAnalysis:missingCount['Medical Analysis'],
         missingVisa:           missingCount['Visa'],
         missingCV:             missingCount['CV'],
+        // Calendar-based
+        eventsToday,
+        eventsTomorrow,
+        eventsThisWeek,
+        eventsOverdue,
+        eventsHighPriority,
         msg: 'Live data successfully retrieved from Google Sheets.'
       }
     };

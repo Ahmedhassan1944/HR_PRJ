@@ -23,6 +23,7 @@ const SHEET_CANDIDATES = 'tbl_Candidates';
 const SHEET_DOCUMENTS = 'tbl_Documents';
 const SHEET_USERS = 'tbl_Users';
 const SHEET_LOGS = 'tbl_SystemLogs';
+const SHEET_EVENTS = 'tbl_Events';
 
 /**
  * Internal: Returns the opened Spreadsheet, cached for this execution.
