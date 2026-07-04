@@ -171,8 +171,9 @@ function api_getDashboardData() {
     let eventsHighPriority = 0;
 
     activeEvents.forEach(evt => {
-      if (!evt.EventDate) return;
-      const [y, m, d] = evt.EventDate.split('-').map(Number);
+      const dateStr = normalizeEventDateString_(evt.EventDate);
+      if (!dateStr) return;
+      const [y, m, d] = dateStr.split('-').map(Number);
       const evDate = new Date(y, m - 1, d);
       
       if (evDate.getTime() === todayDate.getTime()) eventsToday++;

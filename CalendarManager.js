@@ -23,6 +23,22 @@ function authorizeCalendarScope() {
 }
 
 /**
+ * Normalizes a sheet EventDate value (which may be a real Date object
+ * if Sheets auto-converted it, or a plain string) into a consistent
+ * 'YYYY-MM-DD' string.
+ */
+function normalizeEventDateString_(value) {
+  if (!value) return '';
+  if (value instanceof Date) {
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, '0');
+    const d = String(value.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return String(value);
+}
+
+/**
  * Gets or creates the dedicated Google Calendar, caching its ID in PropertiesService.
  */
 function getAppCalendar_() {
@@ -187,6 +203,7 @@ function api_getEventsByCandidate(candidateId) {
       .map(row => {
         const obj = {};
         headers.forEach((h, i) => obj[h] = row[i]);
+        obj.EventDate = normalizeEventDateString_(obj.EventDate);
         return obj;
       })
       .sort((a, b) => new Date(a.EventDate) - new Date(b.EventDate));
@@ -210,6 +227,7 @@ function api_getAllUpcomingEvents() {
       .map(row => {
         const obj = {};
         headers.forEach((h, i) => obj[h] = row[i]);
+        obj.EventDate = normalizeEventDateString_(obj.EventDate);
         return obj;
       });
       
@@ -256,7 +274,7 @@ function api_updateCalendarEvent(eventId, updates) {
       if (calEvent) {
         if (updates.title) calEvent.setTitle(updates.title);
         
-        let newDate = updates.eventDate || rowData[headers.indexOf('EventDate')];
+        let newDate = normalizeEventDateString_(updates.eventDate || rowData[headers.indexOf('EventDate')]);
         let newTime = updates.eventTime !== undefined ? updates.eventTime : rowData[headers.indexOf('EventTime')];
         
         const [year, month, day] = newDate.split('-').map(Number);
