@@ -544,6 +544,12 @@
             Views._kpiCard('Overdue',              k.eventsOverdue      ?? '--', '⚠️', 'red',    'Events past their date',          { type:'calendar', value:'Overdue' }),
             Views._kpiCard('High Priority',        k.eventsHighPriority ?? '--', '🔥', 'orange', 'Important upcoming events',       { type:'calendar', value:'HighPriority' }),
           ].join('');
+        } else {
+          const errMsg = `<div class="form-error" style="grid-column: 1/-1">Failed to load: ${escHtml(kpiRes.error)}</div>`;
+          document.getElementById('kpi-grid-status').innerHTML = errMsg;
+          document.getElementById('kpi-grid-has').innerHTML = errMsg;
+          document.getElementById('kpi-grid-missing').innerHTML = errMsg;
+          document.getElementById('kpi-grid-calendar').innerHTML = errMsg;
         }
 
         if (candsRes.success) {
@@ -2165,6 +2171,7 @@
         }
       } catch (err) {
         Toast.error('Failed to load events.');
+        document.getElementById('calendar-event-list').innerHTML = `<div class="table-empty"><div class="table-empty__icon">⚠️</div>Failed to load events: ${escHtml(err.message)}</div>`;
       }
     },
 

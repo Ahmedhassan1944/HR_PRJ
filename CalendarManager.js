@@ -12,6 +12,17 @@
 const APP_CALENDAR_NAME = 'HR Mobilization — Follow-ups';
 
 /**
+ * ONE-TIME AUTHORIZATION HELPER
+ * Run this function ONCE from the Apps Script editor to grant Calendar permission.
+ * After running it, redeploy the Web App as a "New version".
+ * You can safely delete this function afterwards.
+ */
+function authorizeCalendarScope() {
+  const calendar = getAppCalendar_();
+  Logger.log('✅ Calendar authorized successfully: ' + calendar.getName());
+}
+
+/**
  * Gets or creates the dedicated Google Calendar, caching its ID in PropertiesService.
  */
 function getAppCalendar_() {
@@ -41,6 +52,22 @@ function getAppCalendar_() {
 
   props.setProperty('APP_CALENDAR_ID', calendar.getId());
   return calendar;
+}
+
+function getEventsSheet_() {
+  const ss = getSpreadsheet_();
+  let sheet = ss.getSheetByName(SHEET_EVENTS);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_EVENTS);
+    sheet.appendRow([
+      'EventID', 'CandidateID', 'CandidateName', 'Title', 'Description',
+      'EventDate', 'EventTime', 'Priority', 'ReminderMinutesBefore',
+      'Status', 'GoogleCalendarEventId', 'GoogleCalendarLink',
+      'CreatedBy', 'CreatedAt', 'UpdatedAt'
+    ]);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
 }
 
 /**
@@ -119,7 +146,7 @@ function api_createCalendarEvent(candidateId, eventData) {
     const now = new Date().toISOString();
     const currentUser = Session.getActiveUser().getEmail();
 
-    const eventsSheet = getSheet_(SHEET_EVENTS);
+    const eventsSheet = getEventsSheet_();
     eventsSheet.appendRow([
       eventId,
       candidateId,
@@ -153,7 +180,7 @@ function api_createCalendarEvent(candidateId, eventData) {
  */
 function api_getEventsByCandidate(candidateId) {
   try {
-    const sheet = getSheet_(SHEET_EVENTS);
+    const sheet = getEventsSheet_();
     const [headers, ...rows] = sheet.getDataRange().getValues();
     const events = rows
       .filter(row => row[headers.indexOf('CandidateID')] === candidateId)
@@ -176,7 +203,7 @@ function api_getEventsByCandidate(candidateId) {
  */
 function api_getAllUpcomingEvents() {
   try {
-    const sheet = getSheet_(SHEET_EVENTS);
+    const sheet = getEventsSheet_();
     const [headers, ...rows] = sheet.getDataRange().getValues();
     const events = rows
       .filter(row => row[headers.indexOf('Status')] === 'Active')
@@ -201,7 +228,7 @@ function api_updateCalendarEvent(eventId, updates) {
   if (!auth.authorized) return { success: false, error: auth.error };
 
   try {
-    const sheet = getSheet_(SHEET_EVENTS);
+    const sheet = getEventsSheet_();
     const data = sheet.getDataRange().getValues();
     const headers = data[0];
     const idCol = headers.indexOf('EventID');
@@ -312,7 +339,7 @@ function api_deleteCalendarEvent(eventId) {
   if (!auth.authorized) return { success: false, error: auth.error };
 
   try {
-    const sheet = getSheet_(SHEET_EVENTS);
+    const sheet = getEventsSheet_();
     const data = sheet.getDataRange().getValues();
     const headers = data[0];
     const idCol = headers.indexOf('EventID');
@@ -363,7 +390,7 @@ function api_markEventCompleted(eventId) {
   if (!auth.authorized) return { success: false, error: auth.error };
 
   try {
-    const sheet = getSheet_(SHEET_EVENTS);
+    const sheet = getEventsSheet_();
     const data = sheet.getDataRange().getValues();
     const headers = data[0];
     const idCol = headers.indexOf('EventID');
