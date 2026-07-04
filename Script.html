@@ -2151,17 +2151,22 @@
       </div>
 
       <div class="calendar-grid">
-        <div class="calendar-list" id="calendar-event-list">
-          <div class="loading-overlay"><div class="spinner spinner--dark"></div>Loading upcoming events…</div>
-        </div>
+        <div class="month-calendar" id="month-calendar"></div>
         <div class="calendar-sidebar">
            <div class="kpi-card kpi-card--blue">
              <div class="kpi-card__label">Active Events</div>
              <div class="kpi-card__value" id="cal-kpi-active">--</div>
              <div class="kpi-card__icon" aria-hidden="true">📅</div>
            </div>
+           <div class="calendar-agenda__title" id="calendar-agenda-title">Upcoming Events</div>
+           <div class="calendar-list" id="calendar-event-list">
+             <div class="loading-overlay"><div class="spinner spinner--dark"></div>Loading upcoming events…</div>
+           </div>
         </div>
       </div>`;
+
+      Views._calendarCursor = new Date();
+      Views._calendarSelectedDate = null;
 
       try {
         const res = await GAS.call('api_getAllUpcomingEvents');
@@ -2171,6 +2176,8 @@
           renderSidebar(); // update badge
           
           document.getElementById('cal-kpi-active').textContent = res.data.length;
+          
+          Views._renderMonthCalendar();
           
           const initialFilter = App.state.filter || 'All';
           const btn = document.querySelector(`button[data-cal-filter="${initialFilter}"]`);
@@ -2185,6 +2192,11 @@
     },
 
     _applyCalendarFilter(filterName, btnEl) {
+      Views._calendarSelectedDate = null;
+      if (document.getElementById('month-calendar')) Views._renderMonthCalendar();
+      const agendaTitleEl = document.getElementById('calendar-agenda-title');
+      if (agendaTitleEl) agendaTitleEl.textContent = 'Upcoming Events';
+
       if (btnEl) {
         document.querySelectorAll('.quick-filter-btn').forEach(b => b.classList.remove('quick-filter-btn--active'));
         btnEl.classList.add('quick-filter-btn--active');
@@ -2233,6 +2245,128 @@
       filtered.sort((a,b) => new Date(a.EventDate) - new Date(b.EventDate));
 
       Views._renderEventList(filtered, 'calendar-event-list');
+    },
+
+    _renderMonthCalendar() {
+      const el = document.getElementById('month-calendar');
+      if (!el) return;
+
+      const cursor = Views._calendarCursor || (Views._calendarCursor = new Date());
+      const year = cursor.getFullYear();
+      const month = cursor.getMonth();
+      const monthLabel = cursor.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+      const firstDay = new Date(year, month, 1);
+      const startOffset = firstDay.getDay();
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const events = App.state.calendarEvents || [];
+      const eventsByDay = {};
+      events.forEach(e => {
+        const key = e.EventDate;
+        if (!key) return;
+        if (!eventsByDay[key]) eventsByDay[key] = [];
+        eventsByDay[key].push(e);
+      });
+
+      const weekDays = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+      let cellsHtml = '';
+
+      for (let i = startOffset - 1; i >= 0; i--) {
+        const d = daysInPrevMonth - i;
+        cellsHtml += `<div class="month-calendar__day month-calendar__day--muted"><div class="month-calendar__day-num">${d}</div></div>`;
+      }
+
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateObj = new Date(year, month, d);
+        const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        const dayEvents = eventsByDay[dateKey] || [];
+        const isToday = dateObj.getTime() === today.getTime();
+        const isSelected = Views._calendarSelectedDate === dateKey;
+
+        let dotsHtml = '';
+        if (dayEvents.length > 0) {
+          const shown = dayEvents.slice(0, 3);
+          dotsHtml = `<div class="month-calendar__dots">` +
+            shown.map(e => `<span class="month-calendar__dot month-calendar__dot--${(e.Priority || 'medium').toLowerCase()}" title="${escHtml(e.Title)}"></span>`).join('') +
+            (dayEvents.length > 3 ? `<span class="month-calendar__more">+${dayEvents.length - 3}</span>` : '') +
+            `</div>`;
+        }
+
+        cellsHtml += `
+          <div class="month-calendar__day ${isToday ? 'month-calendar__day--today' : ''} ${dayEvents.length ? 'month-calendar__day--has-events' : ''} ${isSelected ? 'month-calendar__day--selected' : ''}"
+               onclick="Views._selectCalendarDay('${dateKey}')">
+            <div class="month-calendar__day-num">${d}</div>
+            ${dotsHtml}
+          </div>`;
+      }
+
+      const totalCells = startOffset + daysInMonth;
+      const trailing = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+      for (let d = 1; d <= trailing; d++) {
+        cellsHtml += `<div class="month-calendar__day month-calendar__day--muted"><div class="month-calendar__day-num">${d}</div></div>`;
+      }
+
+      el.innerHTML = `
+        <div class="month-calendar__header">
+          <button class="btn btn--icon btn--outline" onclick="Views._calNavigate(-1)" aria-label="Previous month">‹</button>
+          <div class="month-calendar__label">${monthLabel}</div>
+          <button class="btn btn--icon btn--outline" onclick="Views._calNavigate(1)" aria-label="Next month">›</button>
+          <button class="btn btn--outline btn--sm month-calendar__today-btn" onclick="Views._calGoToday()">Today</button>
+        </div>
+        <div class="month-calendar__weekdays">
+          ${weekDays.map(w => `<div class="month-calendar__weekday">${w}</div>`).join('')}
+        </div>
+        <div class="month-calendar__days">
+          ${cellsHtml}
+        </div>
+      `;
+    },
+
+    _calNavigate(delta) {
+      const c = Views._calendarCursor || new Date();
+      Views._calendarCursor = new Date(c.getFullYear(), c.getMonth() + delta, 1);
+      Views._renderMonthCalendar();
+    },
+
+    _calGoToday() {
+      Views._calendarCursor = new Date();
+      Views._calendarSelectedDate = null;
+      Views._renderMonthCalendar();
+      const agendaTitleEl = document.getElementById('calendar-agenda-title');
+      if (agendaTitleEl) agendaTitleEl.textContent = 'Upcoming Events';
+      const initialFilter = App.state.filter || 'All';
+      const btn = document.querySelector(`button[data-cal-filter="${initialFilter}"]`);
+      Views._applyCalendarFilter(initialFilter, btn);
+    },
+
+    _selectCalendarDay(dateKey) {
+      Views._calendarSelectedDate = (Views._calendarSelectedDate === dateKey) ? null : dateKey;
+      Views._renderMonthCalendar();
+
+      document.querySelectorAll('.quick-filter-btn').forEach(b => b.classList.remove('quick-filter-btn--active'));
+
+      const agendaTitleEl = document.getElementById('calendar-agenda-title');
+      const all = App.state.calendarEvents || [];
+
+      if (Views._calendarSelectedDate) {
+        const dayEvents = all
+          .filter(e => e.EventDate === dateKey)
+          .sort((a, b) => (a.EventTime || '').localeCompare(b.EventTime || ''));
+        const [y, m, d] = dateKey.split('-').map(Number);
+        const label = new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: 'long' });
+        if (agendaTitleEl) agendaTitleEl.textContent = `Events on ${label}`;
+        Views._renderEventList(dayEvents, 'calendar-event-list', 'No events scheduled for this day.');
+      } else {
+        if (agendaTitleEl) agendaTitleEl.textContent = 'Upcoming Events';
+        const initialFilter = App.state.filter || 'All';
+        const btn = document.querySelector(`button[data-cal-filter="${initialFilter}"]`);
+        Views._applyCalendarFilter(initialFilter, btn);
+      }
     },
 
     _renderEventList(events, containerId, noDataMsg = 'No upcoming events found.') {
