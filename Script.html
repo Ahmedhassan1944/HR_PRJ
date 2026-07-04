@@ -501,10 +501,15 @@
       if (!Views._dashboardSelectedCards) Views._dashboardSelectedCards = new Set();
 
       try {
-        const [kpiRes, candsRes] = await Promise.all([
+        const [kpiRes, candsRes, eventsRes] = await Promise.all([
           GAS.call('api_getDashboardData'),
-          GAS.call('api_getAllCandidates')
+          GAS.call('api_getAllCandidates'),
+          GAS.call('api_getAllUpcomingEvents')
         ]);
+
+        if (eventsRes.success) {
+          Views._candidateEventDots = Views._buildEventDotsMap(eventsRes.data);
+        }
 
         if (kpiRes.success) {
           const k = kpiRes.data;
@@ -1013,6 +1018,15 @@
         const res = await GAS.call('api_getAllCandidates');
         if (!res.success) throw new Error(res.error);
         App.setState({ candidates: res.data, filteredCandidates: res.data });
+
+        // Fetch upcoming events in the background to populate priority dots
+        GAS.call('api_getAllUpcomingEvents').then(evRes => {
+          if (evRes.success) {
+            Views._candidateEventDots = Views._buildEventDotsMap(evRes.data);
+            Views._renderCandidatesTable(App.state.filteredCandidates);
+          }
+        }).catch(() => {});
+
         // Render immediately (completeness cells will show "Loading…" state)
         Views._renderCandidatesTable(res.data);
         // Fire off batch completeness fetch in background
@@ -1330,6 +1344,27 @@
                   onclick="Views._sortBy('${col}')" aria-sort="${ariaSort}">${label}<span class="th-arrow" aria-hidden="true"> ${arrow}</span></th>`;
     },
 
+    _buildEventDotsMap(events) {
+      const rank = { High: 3, Medium: 2, Low: 1 };
+      const map = {};
+      (events || []).forEach(e => {
+        if (e.Status !== 'Active') return;
+        const cur = map[e.CandidateID];
+        if (!cur || rank[e.Priority] > rank[cur]) {
+          map[e.CandidateID] = e.Priority;
+        }
+      });
+      return map;
+    },
+
+    _eventDotHtml(candidateId) {
+      const p = (Views._candidateEventDots || {})[candidateId];
+      if (!p) return '';
+      const color = p === 'High' ? 'var(--danger)' : p === 'Medium' ? 'var(--warning)' : 'var(--success)';
+      const label = `${p} priority upcoming event`;
+      return `<span class="cand-event-dot" style="background:${color}" title="${label}" aria-label="${label}"></span>`;
+    },
+
     _candidateTableHtml(rows) {
       const { docCompleteness } = App.state;
 
@@ -1366,7 +1401,7 @@
             <div style="display:flex;align-items:center;gap:10px">
               <div style="width:34px;height:34px;border-radius:50%;background:var(--primary-light);color:var(--primary);display:grid;place-items:center;font-weight:700;font-size:.78rem;flex-shrink:0">${fmt.initials(c.FullName)}</div>
               <div>
-                <div class="td-primary">${escHtml(c.FullName)}</div>
+                <div class="td-primary">${escHtml(c.FullName)} ${Views._eventDotHtml(c.CandidateID)}</div>
                 <div class="td-secondary">${escHtml(c.Phone || '—')}</div>
                 ${c.Notes ? `<div class="td-secondary" style="font-style:italic;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(c.Notes)}">${escHtml(c.Notes)}</div>` : ''}
               </div>
@@ -2397,6 +2432,10 @@
             <div class="event-card__meta-item">
               <span>📅</span> ${dateStr} ${e.EventTime ? 'at ' + e.EventTime : '(All Day)'}
             </div>
+            ${e.CandidatePhone ? `
+            <div class="event-card__meta-item">
+              <span>📞</span> <a href="tel:${escHtml(e.CandidatePhone)}">${escHtml(e.CandidatePhone)}</a>
+            </div>` : ''}
             ${e.GoogleCalendarLink ? `
             <div class="event-card__meta-item">
               <span>🔗</span> <a href="${e.GoogleCalendarLink}" target="_blank" rel="noopener">Open in GCal ↗</a>

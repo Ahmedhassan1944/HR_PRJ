@@ -87,6 +87,19 @@ function getEventsSheet_() {
 }
 
 /**
+ * Returns a map of CandidateID -> Phone for enriching event objects.
+ */
+function getCandidatePhoneMap_() {
+  const sheet = getSheet_(SHEET_CANDIDATES);
+  const [headers, ...rows] = sheet.getDataRange().getValues();
+  const idCol = headers.indexOf('CandidateID');
+  const phoneCol = headers.indexOf('Phone');
+  const map = {};
+  rows.forEach(row => { map[row[idCol]] = row[phoneCol]; });
+  return map;
+}
+
+/**
  * Creates a new calendar event for a candidate and logs it in tbl_Events.
  * @param {string} candidateId
  * @param {object} eventData - { title, description, eventDate, eventTime, priority, reminderMinutesBefore }
@@ -198,12 +211,14 @@ function api_getEventsByCandidate(candidateId) {
   try {
     const sheet = getEventsSheet_();
     const [headers, ...rows] = sheet.getDataRange().getValues();
+    const phoneMap = getCandidatePhoneMap_();
     const events = rows
       .filter(row => row[headers.indexOf('CandidateID')] === candidateId)
       .map(row => {
         const obj = {};
         headers.forEach((h, i) => obj[h] = row[i]);
         obj.EventDate = normalizeEventDateString_(obj.EventDate);
+        obj.CandidatePhone = phoneMap[obj.CandidateID] || '';
         return obj;
       })
       .sort((a, b) => new Date(a.EventDate) - new Date(b.EventDate));
@@ -222,12 +237,14 @@ function api_getAllUpcomingEvents() {
   try {
     const sheet = getEventsSheet_();
     const [headers, ...rows] = sheet.getDataRange().getValues();
+    const phoneMap = getCandidatePhoneMap_();
     const events = rows
       .filter(row => row[headers.indexOf('Status')] === 'Active')
       .map(row => {
         const obj = {};
         headers.forEach((h, i) => obj[h] = row[i]);
         obj.EventDate = normalizeEventDateString_(obj.EventDate);
+        obj.CandidatePhone = phoneMap[obj.CandidateID] || '';
         return obj;
       });
       
