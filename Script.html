@@ -95,7 +95,16 @@
           return;
         }
         let call = google.script.run
-          .withSuccessHandler(resolve)
+          .withSuccessHandler((result) => {
+            if (result === null || result === undefined) {
+              reject(new Error(
+                `No response from server for "${fnName}". This can happen right ` +
+                `after a new deployment — try reloading the page.`
+              ));
+              return;
+            }
+            resolve(result);
+          })
           .withFailureHandler(reject);
         call[fnName](...args);
       });
