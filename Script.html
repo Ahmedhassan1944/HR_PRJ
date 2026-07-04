@@ -2434,7 +2434,7 @@
             </div>
             ${e.CandidatePhone ? `
             <div class="event-card__meta-item">
-              <span>📞</span> <a href="tel:${escHtml(e.CandidatePhone)}">${escHtml(e.CandidatePhone)}</a>
+              <span>📞</span> <span class="event-card__phone" title="Double-click to select, then copy">${escHtml(e.CandidatePhone)}</span>
             </div>` : ''}
             ${e.GoogleCalendarLink ? `
             <div class="event-card__meta-item">
