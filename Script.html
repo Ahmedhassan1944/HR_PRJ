@@ -219,7 +219,12 @@
       const toast = document.createElement('div');
       toast.className = `toast toast--${type}`;
       const icons = { success: '✅', error: '❌', warning: '⚠️', default: 'ℹ️' };
-      toast.innerHTML = `<span>${icons[type] || icons.default}</span><span>${message}</span>`;
+      const iconSpan = document.createElement('span');
+      iconSpan.textContent = icons[type] || icons.default;
+      const msgSpan = document.createElement('span');
+      msgSpan.textContent = message;
+      toast.appendChild(iconSpan);
+      toast.appendChild(msgSpan);
       container.appendChild(toast);
       setTimeout(() => toast.remove(), duration);
     },
@@ -1530,16 +1535,16 @@
           <p class="page-header__sub">${escHtml(c.Position)} · ${escHtml(c.Department)} · ${statusBadge(c.CurrentStatus)}</p>
         </div>
         <div class="page-header__actions">
-          <button class="btn btn--outline btn--sm" onclick="Views._openEditProfileModal('${escHtml(c.CandidateID)}')">
+          <button class="btn btn--outline btn--sm" onclick="Views._openEditProfileModal(${JSON.stringify(c.CandidateID)})">
             ✏️ Edit Profile
           </button>
-          <button class="btn btn--outline btn--sm" onclick="Views._openStatusModal('${escHtml(c.CandidateID)}','${escHtml(c.FullName)}')">
+          <button class="btn btn--outline btn--sm" onclick="Views._openStatusModal(${JSON.stringify(c.CandidateID)},${JSON.stringify(c.FullName)})">
             🔄 Update Status
           </button>
-          <button class="btn btn--outline btn--sm" onclick="Views._openEventModal('${escHtml(c.CandidateID)}')">
+          <button class="btn btn--outline btn--sm" onclick="Views._openEventModal(${JSON.stringify(c.CandidateID)})">
             📅 Add Event
           </button>
-          <button class="btn btn--primary" onclick="Views._openUploadModal('${escHtml(c.CandidateID)}','${escHtml(c.DriveFolderID || '')}')">
+          <button class="btn btn--primary" onclick="Views._openUploadModal(${JSON.stringify(c.CandidateID)},${JSON.stringify(c.DriveFolderID || '')})">
             📤 Upload Document
           </button>
         </div>
@@ -1573,11 +1578,11 @@
           </div>
           <div style="display:flex;gap:var(--sp-2)">
             <button class="btn btn--outline btn--sm" ${!c.LocalServerPath ? 'disabled' : ''}
-                    onclick="Views._openLocalFolder('${escHtml(c.CandidateID)}')">
+                    onclick="Views._openLocalFolder(${JSON.stringify(c.CandidateID)})">
               📂 Open Folder
             </button>
             <button class="btn btn--outline btn--sm" ${!c.LocalServerPath ? 'disabled' : ''}
-                    onclick="Views._copyLocalPath('${escHtml(c.CandidateID)}')">
+                    onclick="Views._copyLocalPath(${JSON.stringify(c.CandidateID)})">
               📋 Copy Path
             </button>
           </div>
@@ -1871,7 +1876,7 @@
       </div>
       <div class="modal__footer">
         <button class="btn btn--outline" onclick="Modal.close()">Cancel</button>
-        <button class="btn btn--primary" onclick="Views._submitStatus('${candidateId}')">Save Status</button>
+        <button class="btn btn--primary" onclick="Views._submitStatus(${JSON.stringify(candidateId)})">Save Status</button>
       </div>`);
     },
 
@@ -1924,7 +1929,7 @@
       </div>
       <div class="modal__footer">
         <button class="btn btn--outline" onclick="Modal.close()">Cancel</button>
-        <button class="btn btn--primary" id="edit-save-btn" onclick="Views._submitEditProfile('${candidateId}')">Save Changes</button>
+        <button class="btn btn--primary" id="edit-save-btn" onclick="Views._submitEditProfile(${JSON.stringify(candidateId)})">Save Changes</button>
       </div>`);
     },
 
@@ -2003,7 +2008,7 @@
       <div class="modal__footer">
         <button class="btn btn--outline" onclick="Modal.close()">Cancel</button>
         <button class="btn btn--primary" id="upload-btn"
-                onclick="Views._submitUpload('${candidateId}','${folderId}')">Upload</button>
+                onclick="Views._submitUpload(${JSON.stringify(candidateId)},${JSON.stringify(folderId)})">Upload</button>
       </div>`);
     },
 
@@ -2455,7 +2460,7 @@
 
         cellsHtml += `
           <div class="month-calendar__day ${isToday ? 'month-calendar__day--today' : ''} ${dayEvents.length ? 'month-calendar__day--has-events' : ''} ${isSelected ? 'month-calendar__day--selected' : ''}"
-               onclick="Views._selectCalendarDay('${dateKey}')">
+               onclick="Views._selectCalendarDay(${JSON.stringify(dateKey)})">
             <div class="month-calendar__day-num">${d}</div>
             ${dotsHtml}
           </div>`;
@@ -2566,7 +2571,7 @@
           ${e.Description ? `<div style="font-size:.8rem;margin-top:4px;white-space:pre-wrap;color:var(--text-secondary)">${escHtml(e.Description)}</div>` : ''}
           
           <div class="event-card__actions">
-            ${e.Status === 'Active' ? `<button class="btn btn--outline btn--sm" onclick="Views._markEventComplete('${e.EventID}')">✔️ Mark Completed</button>` : `<span class="event-status event-status--${e.Status.toLowerCase()}">${e.Status}</span>`}
+            ${e.Status === 'Active' ? `<button class="btn btn--outline btn--sm" onclick="Views._markEventComplete(${JSON.stringify(e.EventID)})">✔️ Mark Completed</button>` : `<span class="event-status event-status--${e.Status.toLowerCase()}">${e.Status}</span>`}
           </div>
         </div>`;
       }).join('');
