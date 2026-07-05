@@ -1558,6 +1558,32 @@
         : '<em style="color:var(--text-muted)">No folder yet</em>')}
       </div>
 
+      <!-- Internal Company Folder Card -->
+      <div class="table-card" style="margin-bottom:var(--sp-3)">
+        <div class="table-toolbar">
+          <span class="table-toolbar__title">🖥 Internal Company Folder</span>
+        </div>
+        <div style="padding:var(--sp-3)">
+          <div class="form-group">
+            <label class="form-label" for="local-server-path">Server Path</label>
+            <input type="text" class="form-input" id="local-server-path"
+                   value="${escHtml(c.LocalServerPath || '')}"
+                   placeholder="No internal folder assigned."
+                   readonly ${!c.LocalServerPath ? 'disabled' : ''} />
+          </div>
+          <div style="display:flex;gap:var(--sp-2)">
+            <button class="btn btn--outline btn--sm" ${!c.LocalServerPath ? 'disabled' : ''}
+                    onclick="Views._openLocalFolder('${escHtml(c.CandidateID)}')">
+              📂 Open Folder
+            </button>
+            <button class="btn btn--outline btn--sm" ${!c.LocalServerPath ? 'disabled' : ''}
+                    onclick="Views._copyLocalPath('${escHtml(c.CandidateID)}')">
+              📋 Copy Path
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Document Completeness Panel -->
       <div class="doc-completeness" id="doc-completeness" style="margin-bottom:var(--sp-3)">
         <div class="loading-overlay"><div class="spinner spinner--dark"></div>Calculating completeness…</div>
@@ -1604,6 +1630,49 @@
         <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:4px">${label}</div>
         <div style="font-size:.9rem;font-weight:600">${value || '—'}</div>
       </div>`;
+    },
+
+    // ── INTERNAL COMPANY FOLDER (best-effort local/network path) ──────
+    _openLocalFolder(candidateId) {
+      const c = App.state.candidates.find(cand => cand.CandidateID === candidateId)
+             || App.state.selectedCandidate;
+      const path = c?.LocalServerPath;
+      if (!path) { Toast.warning('No server path assigned.'); return; }
+      try {
+        window.open(path, '_blank');
+      } catch (e) {
+        // Best-effort only — browser/OS may block file:// or UNC paths silently.
+        // Do NOT surface a JS error to the user for this.
+      }
+    },
+
+    _copyLocalPath(candidateId) {
+      const c = App.state.candidates.find(cand => cand.CandidateID === candidateId)
+             || App.state.selectedCandidate;
+      const path = c?.LocalServerPath;
+      if (!path) return;
+
+      const done = () => Toast.success('Server path copied.');
+      const fail = () => Toast.error('Could not copy path.');
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(path).then(done).catch(fail);
+      } else {
+        // Fallback for older browsers without the Clipboard API
+        try {
+          const temp = document.createElement('textarea');
+          temp.value = path;
+          temp.style.position = 'fixed';
+          temp.style.opacity = '0';
+          document.body.appendChild(temp);
+          temp.select();
+          document.execCommand('copy');
+          document.body.removeChild(temp);
+          done();
+        } catch (e) {
+          fail();
+        }
+      }
     },
 
     async _loadCandidateDocuments(candidateId) {
@@ -1802,6 +1871,12 @@
             <label class="form-label" for="edit-notes">Notes</label>
             <textarea class="form-textarea" id="edit-notes" rows="4" placeholder="Add additional instructions or remarks...">${escHtml(c.Notes || '')}</textarea>
           </div>
+          <div class="form-group col-span-2">
+            <label class="form-label" for="edit-local-path">Local Server Path <span style="color:var(--text-muted);font-weight:400">(optional)</span></label>
+            <input type="text" class="form-input" id="edit-local-path" maxlength="500"
+                   placeholder="\\\\FILESERVER\\Candidates\\..."
+                   value="${escHtml(c.LocalServerPath || '')}" />
+          </div>
         </div>
       </div>
       <div class="modal__footer">
@@ -1813,6 +1888,7 @@
     async _submitEditProfile(candidateId) {
       const phone = document.getElementById('edit-phone')?.value?.trim();
       const notes = document.getElementById('edit-notes')?.value?.trim();
+      const localServerPath = document.getElementById('edit-local-path')?.value?.trim().slice(0, 500);
 
       if (!phone) { Toast.warning('Phone number is required.'); return; }
 
@@ -1821,7 +1897,7 @@
       btn.innerHTML = 'Saving...';
 
       try {
-        const res = await GAS.call('api_updateCandidateDetails', candidateId, { phone, notes });
+        const res = await GAS.call('api_updateCandidateDetails', candidateId, { phone, notes, localServerPath });
         if (!res.success) throw new Error(res.error);
 
         // Update local state
@@ -1829,10 +1905,12 @@
         if (cand) {
           cand.Phone = phone;
           cand.Notes = notes;
+          cand.LocalServerPath = localServerPath;
         }
         if (App.state.selectedCandidate?.CandidateID === candidateId) {
           App.state.selectedCandidate.Phone = phone;
           App.state.selectedCandidate.Notes = notes;
+          App.state.selectedCandidate.LocalServerPath = localServerPath;
         }
 
         Modal.close();

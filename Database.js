@@ -143,6 +143,9 @@ function api_createCandidate(candidateData) {
     const id = generateUUID_();
     const now = new Date().toISOString();
 
+    // LocalServerPath is optional; enforce the 500-char max defensively.
+    const localServerPath = (candidateData.localServerPath || '').toString().slice(0, 500);
+
     sheet.appendRow([
       id,                                   // CandidateID
       candidateData.fullName,               // FullName
@@ -156,7 +159,9 @@ function api_createCandidate(candidateData) {
       'Documents Requested',                // CurrentStatus
       now,                                  // CreatedAt
       now,                                  // UpdatedAt
-      ''                                    // DriveFolderID (filled by DriveManager)
+      '',                                   // DriveFolderID (filled by DriveManager)
+      '',                                   // Notes
+      localServerPath                       // LocalServerPath (optional, last column)
     ]);
 
     api_writeLog_(id, 'SYSTEM', 'Candidate Created: ' + candidateData.fullName);
@@ -184,6 +189,7 @@ function api_updateCandidateDetails(candidateId, updates) {
     const idCol = headers.indexOf('CandidateID');
     const phoneCol = headers.indexOf('Phone');
     const notesCol = headers.indexOf('Notes'); // Column N
+    const localPathCol = headers.indexOf('LocalServerPath');
     const updatedCol = headers.indexOf('UpdatedAt');
 
     for (let i = 1; i < data.length; i++) {
@@ -197,6 +203,16 @@ function api_updateCandidateDetails(candidateId, updates) {
             Logger.log('WARNING: Notes column not found in tbl_Candidates. Add it manually.');
           } else {
             sheet.getRange(i + 1, notesCol + 1).setValue(updates.notes);
+          }
+        }
+        if (updates.localServerPath !== undefined) {
+          if (localPathCol === -1) {
+            // LocalServerPath column missing — skip silently and log; do not mutate schema at runtime
+            Logger.log('WARNING: LocalServerPath column not found in tbl_Candidates. Add it manually.');
+          } else {
+            // Enforce the 500-char max defensively; empty string is always allowed.
+            const path = (updates.localServerPath || '').toString().slice(0, 500);
+            sheet.getRange(i + 1, localPathCol + 1).setValue(path);
           }
         }
         sheet.getRange(i + 1, updatedCol + 1).setValue(new Date().toISOString());
