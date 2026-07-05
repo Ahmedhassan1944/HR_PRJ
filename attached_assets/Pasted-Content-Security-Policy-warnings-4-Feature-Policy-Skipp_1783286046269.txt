@@ -1,0 +1,55 @@
+Content-Security-Policy warnings 4
+Feature Policy: Skipping unsupported feature name “clipboard-write”. exec:18:1
+Feature Policy: Skipping unsupported feature name “encrypted-media”. exec:18:1
+Feature Policy: Skipping unsupported feature name “gyroscope”. exec:18:1
+Feature Policy: Skipping unsupported feature name “local-network-access”. exec:18:1
+Feature Policy: Skipping unsupported feature name “magnetometer”. exec:18:1
+Feature Policy: Skipping unsupported feature name “midi”. exec:18:1
+Feature Policy: Skipping unsupported feature name “payment”. exec:18:1
+Feature Policy: Skipping unsupported feature name “picture-in-picture”. exec:18:1
+Feature Policy: Skipping unsupported feature name “sync-xhr”. exec:18:1
+Partitioned cookie or storage access was provided to “https://n-psbfmanwqxoiklmyxde2w2i7kgifois26j72s6y-0lu-script.googleusercontent.com/userCodeAppPanel?createOAuthDialog=true” because it is loaded in the third-party context and dynamic state partitioning is enabled. content.js:76:354
+Feature Policy: Skipping unsupported feature name “accelerometer”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “autoplay”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “clipboard-read”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “clipboard-write”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “encrypted-media”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “gyroscope”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “local-network-access”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “magnetometer”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “midi”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “payment”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “picture-in-picture”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “sync-xhr”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “usb”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “accelerometer”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “autoplay”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “clipboard-read”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “clipboard-write”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “encrypted-media”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “gyroscope”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “local-network-access”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “magnetometer”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “midi”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “payment”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “picture-in-picture”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “sync-xhr”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “usb”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “accelerometer”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “autoplay”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “clipboard-read”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “clipboard-write”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “encrypted-media”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “gyroscope”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “local-network-access”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “magnetometer”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “midi”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “payment”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “picture-in-picture”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “sync-xhr”. userCodeAppPanel
+Feature Policy: Skipping unsupported feature name “usb”. userCodeAppPanel
+Partitioned cookie or storage access was provided to “https://n-psbfmanwqxoiklmyxde2w2i7kgifois26j72s6y-0lu-script.googleusercontent.com/blank” because it is loaded in the third-party context and dynamic state partitioning is enabled. content.js:76:354
+Uncaught SyntaxError: '' string literal contains an unescaped line break userCodeAppPanel:3047:22
+
+​
+
