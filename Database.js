@@ -117,11 +117,6 @@ function requireRole_(allowedRoles) {
  */
 function api_getAllCandidates() {
   try {
-    // [CACHE POLICY] Read-through cache — see ExtendedCaching.md policy notes.
-    const _cache = CacheService.getScriptCache();
-    const _cached = _cache.get('all_candidates');
-    if (_cached) return JSON.parse(_cached);
-
     const sheet = getSheet_(SHEET_CANDIDATES);
     const [headers, ...rows] = sheet.getDataRange().getValues();
     const candidates = rows.map(row => {
@@ -129,9 +124,7 @@ function api_getAllCandidates() {
       headers.forEach((h, i) => obj[h] = row[i]);
       return obj;
     });
-    const result = { success: true, data: candidates };
-    try { _cache.put('all_candidates', JSON.stringify(result), 21600); } catch (_) {}
-    return result;
+    return { success: true, data: candidates };
   } catch (e) {
     Logger.log(e);
     return { success: false, error: e.message };
@@ -167,9 +160,8 @@ function api_createCandidate(candidateData) {
     ]);
 
     api_writeLog_(id, 'SYSTEM', 'Candidate Created: ' + candidateData.fullName);
-    // [CACHE POLICY] Write operation — invalidate affected caches immediately
+    // [CACHE POLICY] Write operation — invalidate dashboard cache immediately
     CacheService.getScriptCache().remove('dashboard_data');
-    CacheService.getScriptCache().remove('all_candidates');
     return { success: true, candidateId: id };
   } catch (e) {
     Logger.log(e);
@@ -209,9 +201,8 @@ function api_updateCandidateDetails(candidateId, updates) {
         }
         sheet.getRange(i + 1, updatedCol + 1).setValue(new Date().toISOString());
         api_writeLog_(candidateId, Session.getActiveUser().getEmail(), 'Profile Updated');
-        // [CACHE POLICY] Write operation — invalidate affected caches immediately
+        // [CACHE POLICY] Write operation — invalidate dashboard cache immediately
         CacheService.getScriptCache().remove('dashboard_data');
-        CacheService.getScriptCache().remove('all_candidates');
         return { success: true };
       }
     }
@@ -263,9 +254,8 @@ function api_updateCandidateStatus(candidateId, newStatus) {
         sheet.getRange(i + 1, statusCol + 1).setValue(newStatus);
         sheet.getRange(i + 1, updatedCol + 1).setValue(new Date().toISOString());
         api_writeLog_(candidateId, Session.getActiveUser().getEmail(), 'Status Changed: ' + newStatus);
-        // [CACHE POLICY] Write operation — invalidate affected caches immediately
+        // [CACHE POLICY] Write operation — invalidate dashboard cache immediately
         CacheService.getScriptCache().remove('dashboard_data');
-        CacheService.getScriptCache().remove('all_candidates');
         return { success: true };
       }
     }
@@ -286,12 +276,6 @@ function api_updateCandidateStatus(candidateId, newStatus) {
  */
 function api_getDocumentsByCandidate(candidateId) {
   try {
-    // [CACHE POLICY] Read-through cache — see ExtendedCaching.md policy notes.
-    const _cache = CacheService.getScriptCache();
-    const _cacheKey = 'docs_' + candidateId;
-    const _cached = _cache.get(_cacheKey);
-    if (_cached) return JSON.parse(_cached);
-
     const sheet = getSheet_(SHEET_DOCUMENTS);
     const [headers, ...rows] = sheet.getDataRange().getValues();
     const documents = rows
@@ -301,9 +285,7 @@ function api_getDocumentsByCandidate(candidateId) {
         headers.forEach((h, i) => obj[h] = row[i]);
         return obj;
       });
-    const result = { success: true, data: documents };
-    try { _cache.put(_cacheKey, JSON.stringify(result), 21600); } catch (_) {}
-    return result;
+    return { success: true, data: documents };
   } catch (e) {
     Logger.log(e);
     return { success: false, error: e.message };
@@ -316,11 +298,6 @@ function api_getDocumentsByCandidate(candidateId) {
  */
 function api_getAllDocuments() {
   try {
-    // [CACHE POLICY] Read-through cache — see ExtendedCaching.md policy notes.
-    const _cache = CacheService.getScriptCache();
-    const _cached = _cache.get('all_documents');
-    if (_cached) return JSON.parse(_cached);
-
     const sheet = getSheet_(SHEET_DOCUMENTS);
     const [headers, ...rows] = sheet.getDataRange().getValues();
     const documents = rows.map(row => {
@@ -328,9 +305,7 @@ function api_getAllDocuments() {
       headers.forEach((h, i) => obj[h] = row[i]);
       return obj;
     });
-    const result = { success: true, data: documents };
-    try { _cache.put('all_documents', JSON.stringify(result), 21600); } catch (_) {}
-    return result;
+    return { success: true, data: documents };
   } catch (e) {
     Logger.log(e);
     return { success: false, error: e.message };

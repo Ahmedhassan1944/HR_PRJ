@@ -139,10 +139,8 @@ function api_uploadFileToDrive(candidateId, folderId, docType, fileName, base64D
     const docId = api_writeDocumentRecord_(candidateId, docType, fileName, fileUrl, mimeType);
     
     api_writeLog_(candidateId, Session.getActiveUser().getEmail(), 'Document Uploaded: ' + docType);
-    // [CACHE POLICY] Write operation — invalidate affected caches immediately
+    // [CACHE POLICY] Write operation — invalidate dashboard cache immediately
     CacheService.getScriptCache().remove('dashboard_data');
-    CacheService.getScriptCache().remove('all_documents');
-    CacheService.getScriptCache().remove('docs_' + candidateId);
     return { success: true, fileUrl: fileUrl, documentId: docId };
   } catch(e) {
     Logger.log(e);

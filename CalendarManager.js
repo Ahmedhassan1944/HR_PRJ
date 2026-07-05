@@ -195,10 +195,7 @@ function api_createCalendarEvent(candidateId, eventData) {
     ]);
 
     api_writeLog_(candidateId, currentUser, 'Calendar Event Created: ' + eventData.title);
-    // [CACHE POLICY] Write operation — invalidate affected caches immediately
     CacheService.getScriptCache().remove('dashboard_data');
-    CacheService.getScriptCache().remove('all_upcoming_events');
-    CacheService.getScriptCache().remove('events_' + candidateId);
 
     return { success: true, eventId, calendarEventId: calEvent.getId(), calendarLink: eventLink };
   } catch (e) {
@@ -212,12 +209,6 @@ function api_createCalendarEvent(candidateId, eventData) {
  */
 function api_getEventsByCandidate(candidateId) {
   try {
-    // [CACHE POLICY] Read-through cache — see ExtendedCaching.md policy notes.
-    const _cache = CacheService.getScriptCache();
-    const _cacheKey = 'events_' + candidateId;
-    const _cached = _cache.get(_cacheKey);
-    if (_cached) return JSON.parse(_cached);
-
     const sheet = getEventsSheet_();
     const [headers, ...rows] = sheet.getDataRange().getValues();
     const phoneMap = getCandidatePhoneMap_();
@@ -231,10 +222,8 @@ function api_getEventsByCandidate(candidateId) {
         return obj;
       })
       .sort((a, b) => new Date(a.EventDate) - new Date(b.EventDate));
-
-    const result = { success: true, data: events };
-    try { _cache.put(_cacheKey, JSON.stringify(result), 21600); } catch (_) {}
-    return result;
+      
+    return { success: true, data: events };
   } catch (e) {
     Logger.log(e);
     return { success: false, error: e.message };
@@ -246,11 +235,6 @@ function api_getEventsByCandidate(candidateId) {
  */
 function api_getAllUpcomingEvents() {
   try {
-    // [CACHE POLICY] Read-through cache — see ExtendedCaching.md policy notes.
-    const _cache = CacheService.getScriptCache();
-    const _cached = _cache.get('all_upcoming_events');
-    if (_cached) return JSON.parse(_cached);
-
     const sheet = getEventsSheet_();
     const [headers, ...rows] = sheet.getDataRange().getValues();
     const phoneMap = getCandidatePhoneMap_();
@@ -263,10 +247,8 @@ function api_getAllUpcomingEvents() {
         obj.CandidatePhone = phoneMap[obj.CandidateID] || '';
         return obj;
       });
-
-    const result = { success: true, data: events };
-    try { _cache.put('all_upcoming_events', JSON.stringify(result), 21600); } catch (_) {}
-    return result;
+      
+    return { success: true, data: events };
   } catch (e) {
     Logger.log(e);
     return { success: false, error: e.message };
@@ -375,10 +357,7 @@ function api_updateCalendarEvent(eventId, updates) {
 
     const titleToLog = updates.title || rowData[headers.indexOf('Title')];
     api_writeLog_(rowData[headers.indexOf('CandidateID')], Session.getActiveUser().getEmail(), 'Calendar Event Updated: ' + titleToLog);
-    // [CACHE POLICY] Write operation — invalidate affected caches immediately
     CacheService.getScriptCache().remove('dashboard_data');
-    CacheService.getScriptCache().remove('all_upcoming_events');
-    CacheService.getScriptCache().remove('events_' + rowData[headers.indexOf('CandidateID')]);
 
     return { success: true, warning: warning };
   } catch (e) {
@@ -429,10 +408,7 @@ function api_deleteCalendarEvent(eventId) {
     sheet.getRange(rowIndex, headers.indexOf('UpdatedAt') + 1).setValue(new Date().toISOString());
 
     api_writeLog_(rowData[headers.indexOf('CandidateID')], Session.getActiveUser().getEmail(), 'Calendar Event Cancelled: ' + rowData[headers.indexOf('Title')]);
-    // [CACHE POLICY] Write operation — invalidate affected caches immediately
     CacheService.getScriptCache().remove('dashboard_data');
-    CacheService.getScriptCache().remove('all_upcoming_events');
-    CacheService.getScriptCache().remove('events_' + rowData[headers.indexOf('CandidateID')]);
 
     return { success: true };
   } catch (e) {
@@ -471,10 +447,7 @@ function api_markEventCompleted(eventId) {
     sheet.getRange(rowIndex, headers.indexOf('UpdatedAt') + 1).setValue(new Date().toISOString());
 
     api_writeLog_(rowData[headers.indexOf('CandidateID')], Session.getActiveUser().getEmail(), 'Calendar Event Completed: ' + rowData[headers.indexOf('Title')]);
-    // [CACHE POLICY] Write operation — invalidate affected caches immediately
     CacheService.getScriptCache().remove('dashboard_data');
-    CacheService.getScriptCache().remove('all_upcoming_events');
-    CacheService.getScriptCache().remove('events_' + rowData[headers.indexOf('CandidateID')]);
 
     return { success: true };
   } catch (e) {

@@ -2243,42 +2243,41 @@
       }
 
       const all = App.state.calendarEvents || [];
-
-      // Build local YYYY-MM-DD strings — avoids UTC-vs-local timezone
-      // mismatches that happen when comparing Date objects parsed from
-      // date-only strings (e.g. "2026-07-05" parses as UTC midnight).
-      const toKey = (d) => {
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${y}-${m}-${day}`;
-      };
-
-      const now = new Date();
-      const todayKey = toKey(now);
-      const tomorrowDate = new Date(now);
-      tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-      const tomorrowKey = toKey(tomorrowDate);
-      const nextWeekDate = new Date(now);
-      nextWeekDate.setDate(nextWeekDate.getDate() + 7);
-      const nextWeekKey = toKey(nextWeekDate);
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const nextWeek = new Date(today);
+      nextWeek.setDate(nextWeek.getDate() + 7);
 
       let filtered = all;
-
+      
       if (filterName === 'Today') {
-        filtered = all.filter(e => e.EventDate === todayKey);
+        filtered = all.filter(e => {
+          const d = new Date(e.EventDate);
+          return d.getTime() === today.getTime();
+        });
       } else if (filterName === 'Tomorrow') {
-        filtered = all.filter(e => e.EventDate === tomorrowKey);
+         filtered = all.filter(e => {
+          const d = new Date(e.EventDate);
+          return d.getTime() === tomorrow.getTime();
+        });
       } else if (filterName === 'ThisWeek') {
-        filtered = all.filter(e => e.EventDate >= todayKey && e.EventDate <= nextWeekKey);
+         filtered = all.filter(e => {
+          const d = new Date(e.EventDate);
+          return d >= today && d <= nextWeek;
+        });
       } else if (filterName === 'Overdue') {
-        filtered = all.filter(e => e.EventDate < todayKey);
+         filtered = all.filter(e => {
+          const d = new Date(e.EventDate);
+          return d < today;
+        });
       } else if (filterName === 'HighPriority') {
-        filtered = all.filter(e => e.Priority === 'High');
+         filtered = all.filter(e => e.Priority === 'High');
       }
-
-      // Sort chronologically (string comparison works fine for YYYY-MM-DD)
-      filtered.sort((a, b) => a.EventDate.localeCompare(b.EventDate));
+      
+      // Sort chronologically
+      filtered.sort((a,b) => new Date(a.EventDate) - new Date(b.EventDate));
 
       Views._renderEventList(filtered, 'calendar-event-list');
     },
