@@ -1633,16 +1633,59 @@
     },
 
     // ── INTERNAL COMPANY FOLDER (best-effort local/network path) ──────
+
+    /**
+     * Converts a raw Windows local/UNC path into a well-formed file:// URL.
+     * Examples:
+     *   D:\Projects\HR(App)        -> file:///D:/Projects/HR(App)
+     *   \\FILESERVER\Candidates\C1 -> file://FILESERVER/Candidates/C1
+     * If the value already looks like a URL (http://, https://, file://),
+     * it is returned unchanged.
+     */
+    _toFileUrl(rawPath) {
+      const path = (rawPath || '').trim();
+      if (!path) return '';
+
+      // Already a URL (http/https/file/smb/etc.) — leave it alone.
+      if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(path)) return path;
+
+      // UNC path: \\SERVER\Share\... -> file://SERVER/Share/...
+      if (path.startsWith('\\\\')) {
+        const unc = path.slice(2).split('\\').filter(Boolean).map(encodeURIComponent).join('/');
+        return 'file://' + unc;
+      }
+
+      // Local drive path: D:\Folder\Sub -> file:///D:/Folder/Sub
+      const driveMatch = path.match(/^([a-zA-Z]):\\(.*)$/);
+      if (driveMatch) {
+        const drive = driveMatch[1];
+        const rest = driveMatch[2].split('\\').filter(Boolean).map(encodeURIComponent).join('/');
+        return 'file:///' + drive + ':/' + rest;
+      }
+
+      // Fallback: normalise backslashes to forward slashes and encode as-is.
+      return 'file:///' + path.split('\\').filter(Boolean).map(encodeURIComponent).join('/');
+    },
+
     _openLocalFolder(candidateId) {
       const c = App.state.candidates.find(cand => cand.CandidateID === candidateId)
              || App.state.selectedCandidate;
       const path = c?.LocalServerPath;
       if (!path) { Toast.warning('No server path assigned.'); return; }
+
+      const fileUrl = Views._toFileUrl(path);
+
       try {
-        window.open(path, '_blank');
+        window.open(fileUrl, '_blank');
       } catch (e) {
         // Best-effort only — browser/OS may block file:// or UNC paths silently.
-        // Do NOT surface a JS error to the user for this.
+        // Do NOT surface a raw JS error to the user for this.
+      } finally {
+        // The browser gives no reliable way to detect success for file:// links
+        // (especially under managed Chrome/Workspace policy, which may silently
+        // redirect elsewhere). Always give the user the guaranteed fallback path.
+        Toast.info?.('If the folder did not open, use "Copy Path" and paste it into File Explorer.')
+          ?? Toast.warning('If the folder did not open, use "Copy Path" and paste it into File Explorer.');
       }
     },
 

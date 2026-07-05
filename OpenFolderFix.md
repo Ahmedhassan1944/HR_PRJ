@@ -1,0 +1,153 @@
+# PROMPT — Fix: "Open Folder" button (Internal Company Folder card)
+
+## ⚠️ PREREQUISITES
+- `InternalCompanyFolder.md` MUST already be applied.
+
+## ⚠️ CRITICAL RULES
+- Do NOT introduce any external framework, npm package, ActiveX, Electron,
+  or browser extension.
+- Only touch `Script.html`, specifically `Views._openLocalFolder`. Do NOT
+  touch `_copyLocalPath`, `Database.js`, or anything else.
+- Do NOT promise this will always work — modern Chrome (especially under
+  a managed Google Workspace browser policy) blocks JavaScript-initiated
+  navigation to `file://` URLs from an `https://` page for security
+  reasons. This is a **browser/IT-policy restriction**, not something any
+  amount of app code can force past. This prompt only makes the attempt
+  as correct and informative as technically possible — it must keep the
+  feature best-effort, exactly like the original spec.
+
+---
+
+## CONTEXT — root cause of the reported bug
+
+The user entered a **local drive path** (e.g. `D:\Projects\GoogleAppsScript(HR)`)
+into "Local Server Path". Two separate problems combine to produce the bad
+result the user is seeing (redirected to `workspace.google.com/products/drive`):
+
+1. **The raw path is not a valid URL.** `window.open()` is currently
+   called with the raw Windows path string (backslashes, no protocol).
+   That is not a well-formed URL, so the browser cannot use it directly.
+2. **Even a correctly-formed `file:///` URL will often be blocked anyway**
+   by Chrome / Workspace-managed browser policy, which may redirect the
+   user to a "use Google Drive instead" page. There is no way to bypass
+   this from JavaScript — it's intentional browser sandboxing.
+
+### What this fix actually does
+- Properly converts the stored path into a well-formed `file://` URL
+  (forward slashes, `file:///` prefix for local drive letters like `D:\`,
+  `file://` + host for UNC paths like `\\SERVER\Share`, and URL-encodes
+  special characters like spaces/parentheses) — so the attempt has the
+  best possible chance of working in setups where the browser/OS do
+  allow it.
+- After attempting to open it, always shows a **neutral, one-time
+  informational toast** telling the user that if nothing opened, they
+  should use "Copy Path" and paste it into File Explorer / a network
+  browser instead — so the user is never left confused with a silent
+  failure or an unexplained redirect.
+- Still fully best-effort and silent on error — never throws a raw JS
+  error to the user.
+
+---
+
+## CHANGE — `Script.html`: rewrite `_openLocalFolder`
+
+**FIND** (exact match):
+```js
+    // ── INTERNAL COMPANY FOLDER (best-effort local/network path) ──────
+    _openLocalFolder(candidateId) {
+      const c = App.state.candidates.find(cand => cand.CandidateID === candidateId)
+             || App.state.selectedCandidate;
+      const path = c?.LocalServerPath;
+      if (!path) { Toast.warning('No server path assigned.'); return; }
+      try {
+        window.open(path, '_blank');
+      } catch (e) {
+        // Best-effort only — browser/OS may block file:// or UNC paths silently.
+        // Do NOT surface a JS error to the user for this.
+      }
+    },
+```
+
+**REPLACE WITH:**
+```js
+    // ── INTERNAL COMPANY FOLDER (best-effort local/network path) ──────
+
+    /**
+     * Converts a raw Windows local/UNC path into a well-formed file:// URL.
+     * Examples:
+     *   D:\Projects\HR(App)        -> file:///D:/Projects/HR(App)
+     *   \\FILESERVER\Candidates\C1 -> file://FILESERVER/Candidates/C1
+     * If the value already looks like a URL (http://, https://, file://),
+     * it is returned unchanged.
+     */
+    _toFileUrl(rawPath) {
+      const path = (rawPath || '').trim();
+      if (!path) return '';
+
+      // Already a URL (http/https/file/smb/etc.) — leave it alone.
+      if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(path)) return path;
+
+      // UNC path: \\SERVER\Share\... -> file://SERVER/Share/...
+      if (path.startsWith('\\\\')) {
+        const unc = path.slice(2).split('\\').filter(Boolean).map(encodeURIComponent).join('/');
+        return 'file://' + unc;
+      }
+
+      // Local drive path: D:\Folder\Sub -> file:///D:/Folder/Sub
+      const driveMatch = path.match(/^([a-zA-Z]):\\(.*)$/);
+      if (driveMatch) {
+        const drive = driveMatch[1];
+        const rest = driveMatch[2].split('\\').filter(Boolean).map(encodeURIComponent).join('/');
+        return 'file:///' + drive + ':/' + rest;
+      }
+
+      // Fallback: normalise backslashes to forward slashes and encode as-is.
+      return 'file:///' + path.split('\\').filter(Boolean).map(encodeURIComponent).join('/');
+    },
+
+    _openLocalFolder(candidateId) {
+      const c = App.state.candidates.find(cand => cand.CandidateID === candidateId)
+             || App.state.selectedCandidate;
+      const path = c?.LocalServerPath;
+      if (!path) { Toast.warning('No server path assigned.'); return; }
+
+      const fileUrl = Views._toFileUrl(path);
+
+      try {
+        window.open(fileUrl, '_blank');
+      } catch (e) {
+        // Best-effort only — browser/OS may block file:// or UNC paths silently.
+        // Do NOT surface a raw JS error to the user for this.
+      } finally {
+        // The browser gives no reliable way to detect success for file:// links
+        // (especially under managed Chrome/Workspace policy, which may silently
+        // redirect elsewhere). Always give the user the guaranteed fallback path.
+        Toast.info?.('If the folder did not open, use "Copy Path" and paste it into File Explorer.')
+          ?? Toast.warning('If the folder did not open, use "Copy Path" and paste it into File Explorer.');
+      }
+    },
+```
+
+> Note: this uses `Toast.info` if your `Toast` object already defines an
+> "info" style toast; otherwise it automatically falls back to
+> `Toast.warning` so this works regardless of which toast levels exist in
+> your `Toast` object — no need to check `Toast.html` definitions first.
+
+---
+
+## TEST CASES
+
+1. **Local drive path** — `D:\Projects\GoogleAppsScript(HR)` → clicking
+   "Open Folder" now attempts `file:///D:/Projects/GoogleAppsScript(HR)`
+   instead of the raw broken string. A follow-up toast reminds the user
+   to use "Copy Path" if nothing opened.
+2. **UNC network path** — `\\FILESERVER\Candidates\CAND-001` → attempts
+   `file://FILESERVER/Candidates/CAND-001`.
+3. **Already a URL** — if `LocalServerPath` is `file:///D:/Foo` or
+   `https://...`, it is passed through unchanged (no double-encoding).
+4. **Managed/locked-down browser** — if Chrome policy still blocks or
+   redirects the navigation, no JavaScript error appears, and the
+   informational toast is shown so the user knows to fall back to
+   "Copy Path" — no more silent confusion.
+5. **Empty path** — unchanged: "No server path assigned." toast, no
+   attempt made.
