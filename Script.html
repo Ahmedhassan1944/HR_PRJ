@@ -1681,10 +1681,13 @@
       const path = c?.LocalServerPath;
       if (!path) { Toast.warning('No server path assigned.'); return; }
 
-      // Browsers (Chrome, Edge, Firefox) always block file:// navigation from an
-      // HTTPS page — window.open() silently does nothing for local/UNC paths.
-      // The reliable UX is: show the path + a Copy button + clear instructions.
-      const fileUrl = Views._toFileUrl(path);
+      // ── APPROACH: Custom URI Protocol Handler (openfolder://) ────────────
+      // file:// links are intercepted by Google and redirected to Drive.
+      // The only reliable way to open a local/UNC path from ANY web page is a
+      // custom protocol registered in Windows (like vscode://, spotify://).
+      // One-time setup per PC: run setup-openfolder/setup-openfolder-protocol.bat
+      // After setup, clicking "🚀 Open Folder" launches Windows Explorer directly.
+      // The Copy Path button is always available as a no-setup fallback.
 
       Modal.open(`
       <div class="modal__header">
@@ -1693,27 +1696,65 @@
       </div>
       <div class="modal__body">
 
-        <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--sp-3);margin-bottom:var(--sp-4)">
+        <!-- Path display -->
+        <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--sp-3);margin-bottom:var(--sp-3)">
           <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:6px">Server Path</div>
           <div style="font-family:monospace;font-size:.9rem;word-break:break-all;color:var(--text-primary);user-select:all">${escHtml(path)}</div>
         </div>
 
-        <div style="background:#fff8e1;border:1px solid #ffe082;border-radius:var(--radius);padding:var(--sp-3);margin-bottom:var(--sp-4);font-size:.85rem;color:#795548">
-          ⚠️ <strong>Why can't the app open the folder directly?</strong><br>
-          Google Apps Script runs inside Google's servers — any <code>file://</code> link gets
-          intercepted by Google and redirected to Google Drive (you've probably seen that error page).
-          This is a browser security rule that cannot be bypassed from a web app.
+        <!-- Option 1: Direct open via custom protocol -->
+        <div style="border:2px solid var(--primary);border-radius:var(--radius);padding:var(--sp-3);margin-bottom:var(--sp-3)">
+          <div style="font-weight:700;margin-bottom:4px;color:var(--primary)">🚀 Open Directly in Windows Explorer</div>
+          <div style="font-size:.83rem;color:var(--text-secondary);margin-bottom:var(--sp-2)">
+            Requires a one-time setup on this PC (run the installer once — see below).
+            After setup, click this button and the folder opens instantly.
+          </div>
+          <button class="btn btn--primary" id="open-direct-btn" onclick="
+            const btn = document.getElementById('open-direct-btn');
+            const a = document.createElement('a');
+            a.href = 'openfolder://' + encodeURIComponent(${jsq(path)});
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            btn.textContent = '⏳ Opening…';
+            btn.disabled = true;
+            setTimeout(() => {
+              btn.textContent = '🚀 Open Folder';
+              btn.disabled = false;
+            }, 3000);
+          ">🚀 Open Folder</button>
         </div>
 
+        <!-- Setup instructions (collapsed by default) -->
+        <details style="border:1px solid var(--border);border-radius:var(--radius);margin-bottom:var(--sp-3)">
+          <summary style="padding:var(--sp-2) var(--sp-3);cursor:pointer;font-weight:600;font-size:.88rem;list-style:none">
+            ⚙️ First time on this PC? Click to see setup instructions
+          </summary>
+          <div style="padding:var(--sp-3);border-top:1px solid var(--border);font-size:.85rem;color:var(--text-secondary)">
+            <ol style="margin:0 0 var(--sp-2) var(--sp-4);padding:0;line-height:2">
+              <li>Go to the GitHub repository: <code>setup-openfolder/</code> folder</li>
+              <li>Download <strong>both</strong> files:<br>
+                  <code>OpenHRFolder.ps1</code> &amp; <code>setup-openfolder-protocol.bat</code></li>
+              <li>Put both files in the <strong>same folder</strong></li>
+              <li>Double-click <strong>setup-openfolder-protocol.bat</strong> and follow the prompts</li>
+              <li>Done — the button above will now open folders directly ✅</li>
+            </ol>
+            <div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:4px;padding:8px;font-size:.8rem;color:#2e7d32">
+              ✅ No admin rights needed · Works in Chrome, Edge, Firefox · One-time per PC
+            </div>
+          </div>
+        </details>
+
+        <!-- Option 2: Copy & Paste (always works, no setup) -->
         <div style="border:1px solid var(--border);border-radius:var(--radius);padding:var(--sp-3)">
-          <div style="font-weight:700;margin-bottom:6px">✅ How to open the folder</div>
-          <ol style="margin:0 0 var(--sp-3) var(--sp-4);padding:0;font-size:.88rem;color:var(--text-secondary);line-height:1.8">
-            <li>Click <strong>📋 Copy Path</strong> below</li>
-            <li>Open <strong>Windows Explorer</strong></li>
-            <li>Press <kbd style="background:var(--bg-surface);border:1px solid var(--border);border-radius:4px;padding:1px 7px;font-size:.82rem">Ctrl + L</kbd> to focus the address bar</li>
-            <li>Paste and press <kbd style="background:var(--bg-surface);border:1px solid var(--border);border-radius:4px;padding:1px 7px;font-size:.82rem">Enter</kbd></li>
-          </ol>
-          <button class="btn btn--primary" id="modal-copy-btn" onclick="
+          <div style="font-weight:700;margin-bottom:4px">📋 Copy &amp; Paste — No Setup Required</div>
+          <div style="font-size:.83rem;color:var(--text-secondary);margin-bottom:var(--sp-2)">
+            Copy the path → open Windows Explorer → press
+            <kbd style="background:var(--bg-surface);border:1px solid var(--border);border-radius:4px;padding:1px 7px">Ctrl+L</kbd>
+            → paste → Enter
+          </div>
+          <button class="btn btn--outline" id="modal-copy-btn" onclick="
             (navigator.clipboard && navigator.clipboard.writeText
               ? navigator.clipboard.writeText(${jsq(path)})
               : Promise.resolve().then(() => {
@@ -1728,7 +1769,7 @@
             ).then(() => {
               const btn = document.getElementById('modal-copy-btn');
               if (btn) { btn.textContent = '✅ Copied!'; btn.disabled = true; }
-            }).catch(() => Toast.error('Could not copy — please select the path above and copy manually.'))
+            }).catch(() => Toast.error('Could not copy — select the path above and copy manually.'))
           ">📋 Copy Path</button>
         </div>
 
