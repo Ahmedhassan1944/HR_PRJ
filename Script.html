@@ -1688,58 +1688,50 @@
 
       Modal.open(`
       <div class="modal__header">
-        <h2 class="modal__title">📂 Open Internal Folder</h2>
+        <h2 class="modal__title">📂 Internal Company Folder</h2>
         <button class="modal__close" onclick="Modal.close()" aria-label="Close">✕</button>
       </div>
       <div class="modal__body">
-        <p style="margin-bottom:var(--sp-3);color:var(--text-secondary);font-size:.9rem">
-          Browsers block direct access to local folders for security reasons.<br>
-          Use one of the options below to open the folder:
-        </p>
 
         <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--sp-3);margin-bottom:var(--sp-4)">
-          <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:6px">Folder Path</div>
-          <div style="font-family:monospace;font-size:.88rem;word-break:break-all;color:var(--text-primary)">${escHtml(path)}</div>
+          <div style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:6px">Server Path</div>
+          <div style="font-family:monospace;font-size:.9rem;word-break:break-all;color:var(--text-primary);user-select:all">${escHtml(path)}</div>
         </div>
 
-        <div style="display:flex;flex-direction:column;gap:var(--sp-3)">
-
-          <div style="border:1px solid var(--border);border-radius:var(--radius);padding:var(--sp-3)">
-            <div style="font-weight:700;margin-bottom:4px">✅ Option 1 — Copy &amp; Paste (always works)</div>
-            <div style="font-size:.85rem;color:var(--text-secondary);margin-bottom:var(--sp-2)">
-              Click <strong>Copy Path</strong>, open Windows Explorer, press <kbd style="background:var(--bg-surface);border:1px solid var(--border);border-radius:4px;padding:1px 6px">Ctrl+L</kbd>, paste, press Enter.
-            </div>
-            <button class="btn btn--primary btn--sm" id="modal-copy-btn" onclick="
-              navigator.clipboard && navigator.clipboard.writeText
-                ? navigator.clipboard.writeText(${jsq(path)}).then(() => {
-                    document.getElementById('modal-copy-btn').textContent = '✅ Copied!';
-                  })
-                : (() => {
-                    const t = document.createElement('textarea');
-                    t.value = ${jsq(path)};
-                    t.style.cssText = 'position:fixed;opacity:0';
-                    document.body.appendChild(t);
-                    t.select();
-                    document.execCommand('copy');
-                    document.body.removeChild(t);
-                    document.getElementById('modal-copy-btn').textContent = '✅ Copied!';
-                  })()
-            ">📋 Copy Path</button>
-          </div>
-
-          <div style="border:1px solid var(--border);border-radius:var(--radius);padding:var(--sp-3)">
-            <div style="font-weight:700;margin-bottom:4px">⚡ Option 2 — Direct link (may work in some setups)</div>
-            <div style="font-size:.85rem;color:var(--text-secondary);margin-bottom:var(--sp-2)">
-              Works only if your browser/IT policy allows <code>file://</code> links (e.g. Internet Explorer, Firefox with special config, or managed Edge).
-            </div>
-            <a href="${escHtml(fileUrl)}" target="_blank" rel="noopener"
-               class="btn btn--outline btn--sm"
-               onclick="setTimeout(()=>{ if(document.hasFocus()) Toast.warning('Browser blocked the link — use Option 1 instead.'); },800)">
-              🔗 Try Direct Link
-            </a>
-          </div>
-
+        <div style="background:#fff8e1;border:1px solid #ffe082;border-radius:var(--radius);padding:var(--sp-3);margin-bottom:var(--sp-4);font-size:.85rem;color:#795548">
+          ⚠️ <strong>Why can't the app open the folder directly?</strong><br>
+          Google Apps Script runs inside Google's servers — any <code>file://</code> link gets
+          intercepted by Google and redirected to Google Drive (you've probably seen that error page).
+          This is a browser security rule that cannot be bypassed from a web app.
         </div>
+
+        <div style="border:1px solid var(--border);border-radius:var(--radius);padding:var(--sp-3)">
+          <div style="font-weight:700;margin-bottom:6px">✅ How to open the folder</div>
+          <ol style="margin:0 0 var(--sp-3) var(--sp-4);padding:0;font-size:.88rem;color:var(--text-secondary);line-height:1.8">
+            <li>Click <strong>📋 Copy Path</strong> below</li>
+            <li>Open <strong>Windows Explorer</strong></li>
+            <li>Press <kbd style="background:var(--bg-surface);border:1px solid var(--border);border-radius:4px;padding:1px 7px;font-size:.82rem">Ctrl + L</kbd> to focus the address bar</li>
+            <li>Paste and press <kbd style="background:var(--bg-surface);border:1px solid var(--border);border-radius:4px;padding:1px 7px;font-size:.82rem">Enter</kbd></li>
+          </ol>
+          <button class="btn btn--primary" id="modal-copy-btn" onclick="
+            (navigator.clipboard && navigator.clipboard.writeText
+              ? navigator.clipboard.writeText(${jsq(path)})
+              : Promise.resolve().then(() => {
+                  const t = document.createElement('textarea');
+                  t.value = ${jsq(path)};
+                  t.style.cssText = 'position:fixed;opacity:0';
+                  document.body.appendChild(t);
+                  t.select();
+                  document.execCommand('copy');
+                  document.body.removeChild(t);
+                })
+            ).then(() => {
+              const btn = document.getElementById('modal-copy-btn');
+              if (btn) { btn.textContent = '✅ Copied!'; btn.disabled = true; }
+            }).catch(() => Toast.error('Could not copy — please select the path above and copy manually.'))
+          ">📋 Copy Path</button>
+        </div>
+
       </div>
       <div class="modal__footer">
         <button class="btn btn--outline" onclick="Modal.close()">Close</button>
