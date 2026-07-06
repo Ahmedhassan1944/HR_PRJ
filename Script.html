@@ -1200,7 +1200,7 @@
     _onDocCheckChange() {
       const checked = [...document.querySelectorAll('.doc-check:checked')].map(el => el.value);
       App.setState({ docFilters: checked });
-      ['Passport','Photo','Academic Certificate','Medical','Visa','CV'].forEach(doc => {
+      ['Passport','Photo','Academic Certificate','Medical Examination','Medical Analysis','Visa','CV'].forEach(doc => {
         const btn = document.getElementById(`qf-doc-${doc.replace(/\s/g,'_')}`);
         if (btn) {
           btn.classList.toggle('quick-filter-btn--active', checked.includes(doc));
@@ -2463,32 +2463,43 @@
 
       let filtered = all;
       
+      // parseLocalDate: parses 'YYYY-MM-DD' as LOCAL midnight (not UTC midnight).
+      // new Date('YYYY-MM-DD') is UTC-only and causes off-by-one-day in many timezones.
+      const parseLocalDate = str => {
+        if (!str) return null;
+        const [y, m, d] = String(str).split('-').map(Number);
+        return new Date(y, m - 1, d);
+      };
+
       if (filterName === 'Today') {
         filtered = all.filter(e => {
-          const d = new Date(e.EventDate);
-          return d.getTime() === today.getTime();
+          const d = parseLocalDate(e.EventDate);
+          return d && d.getTime() === today.getTime();
         });
       } else if (filterName === 'Tomorrow') {
-         filtered = all.filter(e => {
-          const d = new Date(e.EventDate);
-          return d.getTime() === tomorrow.getTime();
+        filtered = all.filter(e => {
+          const d = parseLocalDate(e.EventDate);
+          return d && d.getTime() === tomorrow.getTime();
         });
       } else if (filterName === 'ThisWeek') {
-         filtered = all.filter(e => {
-          const d = new Date(e.EventDate);
-          return d >= today && d <= nextWeek;
+        filtered = all.filter(e => {
+          const d = parseLocalDate(e.EventDate);
+          return d && d >= today && d <= nextWeek;
         });
       } else if (filterName === 'Overdue') {
-         filtered = all.filter(e => {
-          const d = new Date(e.EventDate);
-          return d < today;
+        filtered = all.filter(e => {
+          const d = parseLocalDate(e.EventDate);
+          return d && d < today;
         });
       } else if (filterName === 'HighPriority') {
-         filtered = all.filter(e => e.Priority === 'High');
+        filtered = all.filter(e => e.Priority === 'High');
       }
-      
+
       // Sort chronologically
-      filtered.sort((a,b) => new Date(a.EventDate) - new Date(b.EventDate));
+      filtered.sort((a, b) => {
+        const da = parseLocalDate(a.EventDate), db = parseLocalDate(b.EventDate);
+        return (da || 0) - (db || 0);
+      });
 
       Views._renderEventList(filtered, 'calendar-event-list');
     },
@@ -2625,9 +2636,12 @@
       }
 
       el.innerHTML = events.map(e => {
-        const d = new Date(e.EventDate);
+        // Parse as LOCAL midnight so date labels are never off by one day in non-UTC timezones
+        const [ey, em, ed] = String(e.EventDate || '').split('-').map(Number);
+        const d = new Date(ey, em - 1, ed);
         const dateStr = d.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' });
-        const isPast = d < new Date(new Date().setHours(0,0,0,0));
+        const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
+        const isPast = d < todayMidnight;
         
         return `
         <div class="event-card">
@@ -2682,7 +2696,7 @@
           <button class="modal__close" onclick="Modal.close()" aria-label="Close">✕</button>
         </div>
         <div class="modal__body">
-          <form id="eventForm" class="form-grid" onsubmit="Views._submitEvent(event, '${candidateId}')">
+          <form id="eventForm" class="form-grid" onsubmit="Views._submitEvent(event, ${jsq(candidateId)})">
             
             <div class="form-group col-span-2">
               <label class="form-label">Event Title <span class="required">*</span></label>

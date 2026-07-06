@@ -47,11 +47,12 @@ function getAppCalendar_() {
 
   if (cachedId) {
     try {
-      return CalendarApp.getCalendarById(cachedId);
-    } catch (_) {
-      // Cached ID is stale
-      props.deleteProperty('APP_CALENDAR_ID');
-    }
+      const cal = CalendarApp.getCalendarById(cachedId);
+      // getCalendarById() can return null without throwing (calendar deleted/unshared)
+      if (cal) return cal;
+      // Stale ID — fall through to name search
+    } catch (_) {}
+    props.deleteProperty('APP_CALENDAR_ID');
   }
 
   // First-time lookup: search by name
